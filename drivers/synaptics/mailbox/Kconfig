@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Watchdog device configuration
+#
+
+menuconfig SYNAPTICS_MAILBOX
+  bool "Synaptics Mailbox driver support"
+  default y
+  help
+    Synaptics mailbox driver support
+
+if SYNAPTICS_MAILBOX
+
+config SYNA_IPC
+	tristate "Synaptics IPC Driver"
+	depends on MAILBOX
+	default n
+	help
+	  Synaptics Inter-Processor Communication (IPC) driver. The driver
+	  is used for communication between the application CPUs and various
+	  coprocessor. On the other hand, the driver also acts as HWSPINLOCK.
+
+endif

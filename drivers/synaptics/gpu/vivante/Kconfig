@@ -1,0 +1,23 @@
+config GPU_VIVANTE
+	bool "GPU Vivante" if EXPERT
+	default n
+	help
+	 Enable Vivante GPU
+
+if GPU_VIVANTE
+
+menu "Vivante Options"
+config GPU_VIVANTE_DEBUG
+	bool "Enable debug option"
+	help
+	 BE AWARE THAT THIS WILL NOT WORK TOGETHER WITH A NON-DEBUGGING
+	 USER SPACE GPU DRIVER
+
+config GPU_VIVANTE_PROFILER
+	bool "Enable Profiler"
+
+config GPU_VIVANTE_NEWSIGNAL
+	bool "Use New Linux Signal"
+endmenu
+
+endif

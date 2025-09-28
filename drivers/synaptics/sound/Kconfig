@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig SYNAPTICS_SOUND
+  bool "Synaptics sound driver support"
+  default y
+  help
+    Synaptics sound driver support
+
+if SYNAPTICS_SOUND
+
+source "drivers/synaptics/sound/soc/syna/Kconfig"
+source "drivers/synaptics/sound/soc/codecs/Kconfig"
+
+endif

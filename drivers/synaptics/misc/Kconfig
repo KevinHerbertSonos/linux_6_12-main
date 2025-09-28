@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Misc strange devices
+#
+
+menuconfig SYNAPTICS_MISC
+  bool "Synaptics msic driver support"
+  default y
+  help
+    Synaptics MISC driver support
+
+if SYNAPTICS_MISC
+
+config DSPG_CCU
+	bool "DSPG coherency control unit (CCU)"
+	depends on PLAT_DVF
+	default y if PLAT_DVF
+	help
+	  Add support for the CCU.
+
+endif

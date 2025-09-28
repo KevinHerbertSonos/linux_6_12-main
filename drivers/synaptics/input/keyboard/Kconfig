@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Input core configuration
+#
+
+config KEYBOARD_BERLIN_IR
+	tristate "Berlin Infra-Red remote keypad support"
+	depends on BERLIN_SM
+	default n
+	help
+	  Enable support for Berlin Infra-Red remote keypad
+
+config KEYBOARD_DSPG_TRI
+	tristate "DSPG tri keypad interface driver"
+	depends on MFD_CORE
+	select INPUT_OF_MATRIX_KEYMAP if USE_OF
+	help
+	  Say Y here if you want to get support for the DSPG tri keypad interface.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called dspg-keypad.

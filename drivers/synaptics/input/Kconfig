@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Input device configuration
+#
+
+menuconfig SYNAPTICS_INPUT
+  bool "Synaptics input driver support"
+  default y
+  help
+    Synaptics input driver support
+
+if SYNAPTICS_INPUT
+
+source "drivers/synaptics/input/keyboard/Kconfig"
+
+source "drivers/synaptics/input/touchscreen/Kconfig"
+
+source "drivers/synaptics/input/misc/Kconfig"
+
+endif

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Network device configuration
+#
+
+menuconfig SYNAPTICS_NET
+  bool "Synaptics Net driver support"
+  default y
+  help
+    Synaptics Net driver support
+
+if SYNAPTICS_NET
+
+source "drivers/synaptics/net/phy/Kconfig"
+
+source "drivers/synaptics/net/wireless/Kconfig"
+
+source "drivers/synaptics/net/dsa/Kconfig"
+
+source "drivers/synaptics/net/ethernet/Kconfig"
+
+endif

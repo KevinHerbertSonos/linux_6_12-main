@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config DWMAC_DVF
+	tristate "DVF DWMAC support"
+	default PLAT_DVF
+	depends on OF
+	help
+	  Support for DVF DWMAC Ethernet controller.
+
+	  This selects the Anarion SoC glue layer support for the stmmac driver.

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Multiplexer I2C chip drivers configuration
+#
+
+config I2C_DYNDMX_PINCTRL
+	tristate "pinctrl-based I2C dynamic demultiplexer"
+	depends on PINCTRL && OF
+	help
+	  If you say yes to this option, support will be included for an I2C
+	  demultiplexer that uses the pinctrl subsystem. This is useful if you
+	  want to dynamically use different I2C master.
+

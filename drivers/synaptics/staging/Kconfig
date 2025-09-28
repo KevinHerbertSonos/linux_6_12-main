@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+
+menuconfig SYNAPTICS_STAGING
+  bool "Synaptics staging driver support"
+  default y
+  help
+    Synaptics STAGING driver support
+
+if SYNAPTICS_STAGING
+
+source "drivers/synaptics/staging/dspg/Kconfig"
+
+endif

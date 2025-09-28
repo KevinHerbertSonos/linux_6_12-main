@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "CODEC drivers"
+
+config SND_SOC_CX9000
+	tristate "Synaptics CX9000 AMPLIFIER"
+	depends on I2C
+	default n
+
+endmenu

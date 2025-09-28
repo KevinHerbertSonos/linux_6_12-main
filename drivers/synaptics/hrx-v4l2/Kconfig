@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config SYNAPTICS_HRX_V4L2
+	tristate "Synaptics HDMI-Rx V4L2 driver support"
+	default n
+	help
+	  Synaptics HDMI-Rx V4L2 driver support

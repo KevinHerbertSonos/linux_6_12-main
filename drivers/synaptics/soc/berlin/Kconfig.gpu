@@ -1,0 +1,18 @@
+#
+# GPU variants
+#
+
+choice
+	prompt	"Synaptics GPU Variants"
+	default	GPU_PLATYPUS
+
+config GPU_PLATYPUS
+	bool	"Synaptics PLATYPUS"
+
+config GPU_DOLPHIN
+	bool	"Synaptics DOLPHIN"
+
+config GPU_MYNA2
+	bool	"Synaptics MYNA2"
+
+endchoice

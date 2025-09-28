@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+
+menuconfig SYNAPTICS_CLOCKSOURCE
+  bool "Synaptics clock source driver support"
+  default y
+  help
+    Synaptics clock source driver support
+
+if SYNAPTICS_CLOCKSOURCE
+
+config CLKSRC_DSPG_RTC
+	bool
+	select TIMER_OF if OF
+	depends on PLAT_DVF
+	default y if !COMMON_CLK_DSPG
+
+config CLKSRC_DSPG_TIMER
+	bool
+	depends on PLAT_DVF
+	select TIMER_OF if OF
+	default y if !COMMON_CLK_DSPG
+
+config CLKSRC_DSPG
+	bool
+	depends on PLAT_DVF
+	select TIMER_OF if OF
+	default y if COMMON_CLK_DSPG
+
+config SSE_TIMER
+	bool "ARM SSE(Subsystems for Embedded) system timer driver"
+	depends on COMMON_CLK
+	default n
+	help
+	  Enables support for the ARM SSE(Subsystems for Embedded) system timer driver.
+
+endif

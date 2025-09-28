@@ -1,0 +1,9 @@
+#ifndef _DVF99_MUSB_HAL
+#define _DVF99_MUSB_HAL
+
+#define HOST_VBUS_POWER_ON		1
+#define HOST_VBUS_POWER_OFF		0
+
+#define DVF99_USB11_NUM_RESET_RETRIES	0x200
+
+#endif

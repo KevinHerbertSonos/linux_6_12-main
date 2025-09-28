@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# fbdev configuration
+#
+
+config FB_DSPG
+	tristate "DSPG framebuffer support"
+	depends on FB && ARM
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	help
+	  Choose this option if you want to use the DSPG-LCDC device as a
+	  framebuffer device.
+
+config FB_DSPG_EXT_TE
+	bool "DSPG framebuffer external TE trigger support"
+	default y
+	depends on FB_DSPG && MFD_SYSCON
+	select REGMAP
+
+config FB_ST7528
+	tristate "ST7528 framebuffer support"
+	depends on FB && ARM && SPI_MASTER
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select FB_DEFERRED_IO
+	help
+	  Choose this option if you want to use the ST7528 based device as a
+	  framebuffer device.
+
+menu "ST7528 framebuffer options"
+	depends on FB_ST7528
+
+config FB_ST7528_FPS
+	int "Number of frames per second to update in bruteforce mode"
+	default 10
+	help
+	  This sets the default number of frames per second the display
+	  will get updated in bruteforce mode.
+
+config FB_ST7528_DEFERRED_IO_DELAY
+	int "Number of jiffies to wait before display will be updated"
+	default 5
+	help
+	  This sets the delay in jiffies after the deferred IO will start to
+	  write data to the display.
+
+endmenu
+
+config FB_MPMC
+	tristate "MPMC framebuffer support"
+	depends on FB && ARCH_DVF
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select FB_DEFERRED_IO
+	help
+	  Choose this option if you want to use the MPMC based device as a
+	  framebuffer device.

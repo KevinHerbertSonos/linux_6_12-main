@@ -1,0 +1,31 @@
+
+config DMABUF_HEAPS_CMA_CUST
+	tristate "DMA-BUF CMA Cust Heap"
+	depends on DMABUF_HEAPS && DMA_CMA && DMABUF_HEAPS_EXTRA
+	help
+	  Choose this option to enable dma-buf CMA Cust heap. This heap is backed
+	  by the Contiguous Memory Allocator (CMA). If your system has these
+	  regions, you should say Y here.
+
+config DMABUF_HEAPS_SYSTEM_CUST
+	tristate "DMA-BUF System Cust Heap"
+	depends on DMABUF_HEAPS && DMABUF_HEAPS_EXTRA
+	select DMABUF_HEAPS_PAGE_POOL
+	select DMABUF_HEAPS_DEFERRED_FREE
+	help
+	  Choose this option to enable the dma-buf System Cust Heap. The system cust
+	  heap is backed by pages from the buddy allocator. If in doubt, say Y.
+
+config DMABUF_HEAPS_BERLIN
+	tristate "DMA-BUF Berlin Heap"
+	depends on DMABUF_HEAPS && DMABUF_HEAPS_EXTRA
+	help
+	  Choose this option to enable the dma-buf berlin heaps. This heap is to
+	  support berlin platform related features.
+
+config DMABUF_HEAPS_EXTRA
+	tristate "DMA-BUF Heap Extra Extension"
+	depends on DMABUF_HEAPS
+	help
+	Choose this option to enable dma heap extra functions, currently it
+	only supports heap call back register.

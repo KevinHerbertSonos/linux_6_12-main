@@ -1,0 +1,5 @@
+config COMMON_CLK_DSPG
+	bool "Dspg common clock drivers"
+	depends on OF
+	help
+	  Dspg common clock drivers

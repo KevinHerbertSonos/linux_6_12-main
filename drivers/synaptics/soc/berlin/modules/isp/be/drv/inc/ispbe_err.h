@@ -1,0 +1,78 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (C) 2021 - 2023 Synaptics Incorporated
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+#ifndef _ISPBE_ERR_H_
+#define _ISPBE_ERR_H_
+
+enum ISPSS_ERRORNUM {
+	ISPSS_FAIL = -1,
+	ISPSS_OK = 0,
+	ISPSS_ENODEV,
+	ISPSS_EBADCALL,
+	ISPSS_EUNSUPPORT,
+	ISPSS_EIOFAIL,
+	ISPSS_EUNCONFIG,
+	ISPSS_ECMDQFULL,
+	ISPSS_EFRAMEQFULL,
+	ISPSS_EBCMBUFFULL,
+	ISPSS_ENOMEM,
+	ISPSS_EVBIBUFFULL,
+	ISPSS_EHARDWAREBUSY,
+	ISPSS_ECLIENTID,
+	ISPSS_EINQFULL,
+	ISPSS_EOUTQFULL,
+	ISPSS_EQNOTEMPTY,
+	ISPSS_EBADPARAM,
+	ISPSS_EINVALID_SRCFMT,
+	ISPSS_EINVALID_DTILEEN,
+	ISPSS_EINVALID_BPP,
+	ISPSS_EINVALID_ROTATE,
+	ISPSS_EINVALID_RES,
+	ISPSS_EINVALID_MODULE,
+	ISPSS_EINVALID_SENSOR,
+
+	//DWP SPECIFIC ERROR
+	ISPSS_DWP_ERROR_START = 0x10000,
+	ISPSS_DWP_INVALID_SENSOR = ISPSS_DWP_ERROR_START,
+	/* By raising this flag, LDI implies that LRST-to-LRST window
+	 * is too small to accommodate transfer time for a stride.
+	 * Software must stretch LRST-to-LRST window by
+	 * increasing horizontal blanking period
+	 */
+	ISPSS_DWP_SHORTSTRIDE_WIN,
+	/* By raising this flag, LDI implies that FRST-to-FRST window
+	 * is too small to accommodate transfer time for a frame.
+	 * Software must stretch FRST-to-FRST window by
+	 * increasing vertical blanking period.
+	 */
+	ISPSS_DWP_SHORTFRAME_WIN,
+	ISPSS_DWP_SHORT_STRIDE_FRAME_WIN,
+	ISPSS_DWP_INVALID_DISWIN,
+	ISPSS_DWP_INVALID_CISWIN,
+	ISPSS_DWP_INVALID_IFRAME,
+	ISPSS_DWP_INVALID_DISGRID,
+	ISPSS_DWP_INVALID_RES,
+	ISPSS_DWP_INVALID_SRCFMT,
+	ISPSS_DWP_INVALID_BPP,
+	ISPSS_DWP_INVALID_BICUBIC,
+	ISPSS_DWP_INVALID_LUT,
+	ISPSS_DWP_LUTGEN_INPROGRESS,
+	ISPSS_DWP_LUT_PRESENT,
+	ISPSS_DWP_LUT_NOTPRESENT,
+
+	//TILER SPECIFIC ERROR
+	ISPSS_TILER_ERROR_START = 0x20000,
+
+	//DNSCL SPECIFIC ERROR
+	ISPSS_DNSCL_ERROR_START = 0x30000,
+
+	//ROT SPECIFIC ERROR
+	ISPSS_ROT_ERROR_START = 0x40000,
+};
+
+#endif

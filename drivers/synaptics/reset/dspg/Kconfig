@@ -1,0 +1,7 @@
+config DVF101_RESET
+	bool
+	default y if ARCH_DVF101
+
+config DVF99_RESET
+	bool
+	default y if ARCH_DVF

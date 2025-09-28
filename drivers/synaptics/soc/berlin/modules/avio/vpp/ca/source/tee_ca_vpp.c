@@ -1,0 +1,1628 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright (C) 2019-2020 Synaptics Incorporated */
+
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/errno.h>
+#include <linux/types.h>
+#include <linux/mutex.h>
+#include <linux/proc_fs.h>
+#include <linux/firmware.h>
+
+#include "tee_ca_vpp.h"
+#include "tee_ca_common.h"
+#include "vbuf.h"
+#include "tee_client_type.h"
+#include "tee_client_api.h"
+
+#define bTST(x, b) (((x) >> (b)) & 1)
+
+#define DEFAULT_SESSION_INDEX 0
+
+#undef VPP_CA_ENABLE_DIAG_PRT
+//#define VPP_CA_ENABLE_DIAG_PRT
+#ifdef VPP_CA_ENABLE_DIAG_PRT
+#define VPP_CA_DBG_PRINT(...) pr_info(__VA_ARGS__)
+#else
+#define VPP_CA_DBG_PRINT(fmt, ...) do {} while (0)
+#endif
+
+#define TA_IMG_PATH_FASTLOGO "ta/libfastlogo.ta"
+#define TA_IMG_PATH_VPP      "ta/libvpp.ta"
+
+typedef struct __VPP_CA_CONTEXT__ {
+	ENUM_TA_UUID_TYPE uuidType;
+	int initialized;
+	TEEC_Context context;
+} VPP_CA_CONTEXT;
+
+typedef struct __VPP_CA_SESSION__ {
+	int initialized;
+	TEEC_Session session;
+	TEEC_SharedMemory Shm;
+	struct mutex shm_mutex;
+} VPP_CA_SESSION;
+
+static VPP_CA_CONTEXT g_vppCaContext;
+static VPP_CA_SESSION TAVPPInstance[MAX_TAVPP_INSTANCE_NUM];
+
+static void VPP_CA_getVppTaUUID(ENUM_TA_UUID_TYPE uuidType, TEEC_UUID *pUUID)
+{
+	const TEEC_UUID TAVPP_CA_UUID = TAVPP_UUID;
+	const TEEC_UUID TAVPP_CA_fastlogo_UUID = TA_FASTLOGO_UUID;
+
+	//Get the mode of bootup recovery/normal and select the ta accordingly
+	g_vppCaContext.uuidType = uuidType;
+	pr_err("%s:%d: loading recovery ta:%x(%s)\n", __func__, __LINE__,
+		g_vppCaContext.uuidType, (g_vppCaContext.uuidType == TA_UUID_VPP) ? "vpp.ta" : "fastlogo.ta");
+	memcpy(pUUID, (g_vppCaContext.uuidType == TA_UUID_VPP) ? &TAVPP_CA_UUID : &TAVPP_CA_fastlogo_UUID, sizeof(TEEC_UUID));
+}
+
+static int VPP_CA_load_ta(struct device *dev, ENUM_TA_UUID_TYPE uuidType)
+{
+	TEEC_Context *tee_ctx = &g_vppCaContext.context;
+	const char *ta_img_path =
+		(uuidType == TA_UUID_VPP ? TA_IMG_PATH_VPP : TA_IMG_PATH_FASTLOGO);
+	const struct firmware *fw = NULL;
+	TEEC_SharedMemory fw_shm = { 0, };
+	TEEC_Parameter tee_param = { 0, };
+	int ret;
+
+	ret = request_firmware(&fw, ta_img_path, dev);
+	if (ret) {
+		pr_err("faild req fw 0x%x %s\n", ret, ta_img_path);
+		return ret;
+	}
+
+	fw_shm.size = ALIGN(fw->size, PAGE_SIZE);
+	fw_shm.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+	ret = TEEC_AllocateSharedMemory(tee_ctx, &fw_shm);
+	if (ret || !fw_shm.buffer) {
+		pr_err("can't allocate memory(%zu) for firmware loading: 0x%x\n",
+			fw_shm.size, ret);
+		ret = -ENOMEM;
+		goto free_fw;
+	}
+	memcpy(fw_shm.buffer, fw->data, fw->size);
+
+	tee_param.memref.parent = &fw_shm;
+	tee_param.memref.size = fw_shm.size;
+	ret = TEEC_RegisterTA(tee_ctx, &tee_param, TEEC_MEMREF_PARTIAL_INPUT);
+	if (TEEC_ERROR_ACCESS_CONFLICT == ret) {
+		pr_warn("%s TA has been loaded\n", ta_img_path);
+		ret = 0;
+	} else if (ret) {
+		pr_err("can't register %s TA: 0x%08x\n", ta_img_path, ret);
+	} else {
+		pr_info("TA loaded sucessfully - %s\n", ta_img_path);
+	}
+
+	TEEC_ReleaseSharedMemory(&fw_shm);
+free_fw:
+	release_firmware(fw);
+	return ret;
+}
+
+int VPP_CA_Initialize(ENUM_TA_UUID_TYPE uuidType, struct device *dev)
+{
+	int index;
+	TEEC_Result result;
+	TEEC_UUID TAVPP_CA_UUID;
+	TEEC_SharedMemory *pShm;
+
+	if (g_vppCaContext.initialized)
+		return TEEC_SUCCESS;
+
+	g_vppCaContext.initialized = true;
+
+	VPP_CA_getVppTaUUID(uuidType, &TAVPP_CA_UUID);
+	/* ========================================================================
+	 *  [1] Connect to TEE
+	 * ========================================================================
+	 */
+	result = TEEC_InitializeContext(NULL, &g_vppCaContext.context);
+		pr_err("%s:%d: result:%x\n", __func__, __LINE__, result);
+	if (result != TEEC_SUCCESS) {
+		pr_err("%s:%d: result:%x\n", __func__, __LINE__, result);
+		goto cleanup1;
+	}
+
+	/* ========================================================================
+	 *  [2] Load TA, If required during ampless boot.
+	 * ========================================================================
+	 */
+	if (dev) {
+		VPP_CA_load_ta(dev, uuidType);
+	}
+
+	/* ========================================================================
+	 * [3] Open session with TEE application
+	 * ========================================================================
+	 */
+	for (index = 0; index < MAX_TAVPP_INSTANCE_NUM; index++) {
+
+
+		result = TEEC_OpenSession(&g_vppCaContext.context,
+					&(TAVPPInstance[index].session), &TAVPP_CA_UUID, TEEC_LOGIN_USER,
+					NULL,   /* No connection data needed for TEEC_LOGIN_USER. */
+					NULL,    /* No payload, and do not want cancellation. */
+					NULL);
+		pr_err("%s:%d: TEEC_OpenSession:%d result:%x\n", __func__, __LINE__, index, result);
+		if (result != TEEC_SUCCESS) {
+			pr_err("%s:%d: result:%x\n", __func__, __LINE__, result);
+			goto cleanup2;
+		}
+
+		pShm = &(TAVPPInstance[index].Shm);
+		memset(pShm, 0, sizeof(TEEC_SharedMemory));
+		pShm->size = TAVPP_PASS_SHMSIZE;
+		pShm->flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+		result = TEEC_AllocateSharedMemory(&g_vppCaContext.context, pShm);
+		VPP_TEEC_LOGIFERROR(result);
+		if (result) {
+			pr_err("%s:%d: TEEC_AllocateSharedMemory: %d result:%x\n",
+				__func__, __LINE__, index, result);
+			goto cleanup3;
+		}
+
+		mutex_init(&(TAVPPInstance[index].shm_mutex));
+		TAVPPInstance[index].initialized = true;
+	}
+
+	return TEEC_SUCCESS;
+cleanup3:
+	for (index = 0; index < MAX_TAVPP_INSTANCE_NUM; index++) {
+		pShm = &(TAVPPInstance[index].Shm);
+		TEEC_ReleaseSharedMemory(pShm);
+	}
+cleanup2:
+	TEEC_FinalizeContext(&g_vppCaContext.context);
+cleanup1:
+	return result;
+}
+
+void VPP_CA_Finalize(void)
+{
+	int index;
+
+	if (!g_vppCaContext.initialized)
+		return;
+
+	g_vppCaContext.initialized = 0;
+
+	for (index = 0; index < MAX_TAVPP_INSTANCE_NUM; index++) {
+		if (TAVPPInstance[index].initialized) {
+			TEEC_ReleaseSharedMemory(&(TAVPPInstance[index].Shm));
+			TEEC_CloseSession(&(TAVPPInstance[index].session));
+			memset(&TAVPPInstance[index], 0, sizeof(TAVPPInstance[index]));
+			TAVPPInstance[index].initialized = false;
+		}
+	}
+	TEEC_FinalizeContext(&g_vppCaContext.context);
+}
+
+static inline int VPP_CA_GetInstanceID(void)
+{
+	int InstanceID = TAVPP_API_INSTANCE;
+
+	return InstanceID;
+}
+
+static TEEC_Result InvokeCommandHelper(int session_index, TEEC_Session *pSession,
+	VPP_CMD_ID commandID, TEEC_Operation *pOperation, UINT32 *returnOrigin)
+{
+	TEEC_Result result;
+	int cmdID = commandID;
+	int instID = DEFAULT_SESSION_INDEX;
+
+	commandID = CREATE_CMD_ID(cmdID, instID);
+	VPP_CA_DBG_PRINT("%s:%d: session_index:%d, pSession:%p commandID:%d, pOperation:%p, initialsized:%d\n",
+		__func__, __LINE__, session_index, pSession, commandID, pOperation, g_vppCaContext.initialized);
+
+	if (g_vppCaContext.initialized)
+		result = TEEC_InvokeCommand(pSession, commandID, pOperation, NULL);
+	else
+		result = TEEC_SUCCESS;
+
+	return result;
+}
+
+int VPP_CA_InitVPPS(UINT32 vpp_addr, UINT32 ta_heapHandle)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result = 0x0;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[1].value.a = 0xdeadbeef;
+	operation.params[0].value.a = vpp_addr;
+#if defined(VPP_ENABLE_INTERNAL_MEM_MGR)
+	operation.params[0].value.b = ta_heapHandle;
+#endif
+	operation.started = 1;
+	result = InvokeCommandHelper(index, pSession, VPP_INITIATE_VPPS, &operation, NULL);
+	VPP_TEEC_LOGIFERROR(result);
+	result = operation.params[1].value.a;
+
+	return result;
+}
+
+int VPP_CA_GetCPCBOutputResolution(int cpcbID, int *pResID)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = cpcbID;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+	operation.params[1].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index, pSession, VPP_GETCPCBOUTRES, &operation, NULL);
+	*pResID = operation.params[1].value.a;
+
+	return operation.params[1].value.b;
+}
+
+int VPP_CA_GetResDescription(void *pOutBuffer, VPP_SHM_ID shmCmdId,
+						unsigned int sOutBufferSize, unsigned int ResId)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+	TEEC_SharedMemory *pShm;
+
+	if (!pOutBuffer)
+		return MV_VPP_EBADPARAM;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	pShm = &(TAVPPInstance[index].Shm);
+	if (pShm && pShm->size < sOutBufferSize) {
+		pr_err("%s:%d: pShm->size %zu, sOutBufferSize %d\n",
+			__func__, __LINE__, pShm->size, sOutBufferSize);
+		return -EINVAL;
+	}
+
+	mutex_lock(&(TAVPPInstance[index].shm_mutex));
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_MEMREF_PARTIAL_INOUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE);
+
+	operation.params[0].value.a = shmCmdId;
+	operation.params[1].memref.parent = pShm;
+	operation.params[1].memref.size = sOutBufferSize;
+	operation.params[1].memref.offset = 0;
+	operation.params[2].value.a = ResId;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_PASSSHM,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	if (pOutBuffer)
+		memcpy(pOutBuffer, pShm->buffer, sOutBufferSize);
+
+	mutex_unlock(&(TAVPPInstance[index].shm_mutex));
+
+	return operation.params[2].value.a;
+}
+
+int VPP_CA_GetCurrentHDCPVersion(int *pHDCPVersion)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	memset(&operation, 0, sizeof(TEEC_Operation));
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INOUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+	operation.params[0].value.a = 0x0;
+
+	/*Clear the return value*/
+	operation.params[0].value.b = 0xdeadbeef;
+
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index, pSession, VPP_GETCURHDCPVERSION, &operation, NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	*pHDCPVersion = ((operation.params[0].value.a) & 0xFF);
+
+	return operation.params[0].value.b;
+}
+
+int VPP_CA_PassVbufInfo_Phy(int is_vpp_ta, void *Vbuf, unsigned int VbufSize,
+						 void *Clut, unsigned int ClutSize,
+						 int PlaneID, int ClutValid, VPP_SHM_ID ShmID)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+	VBUF_INFO *pVppDesc = Vbuf;
+	VPP_VBUF *pVBufInfo = (VPP_VBUF*)pVppDesc->pVppVbufInfo_phy;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	/* register Clut info*/
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INOUT);
+
+	operation.params[0].value.a = ShmID;
+	operation.params[0].value.b = (int)(long)pVBufInfo;
+	operation.params[3].value.a = PlaneID;
+
+	/* clear result */
+	operation.params[3].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_PASSPHY,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[3].value.b;
+}
+
+int VPP_CA_PassVbufInfo(int is_vpp_ta, void *Vbuf_phyAddr, unsigned int VbufSize,
+						 void *Clut_phyAddr, unsigned int ClutSize,
+						 int PlaneID, int ClutValid, VPP_SHM_ID ShmID)
+{
+	int index;
+	TEEC_Session *pSession;
+
+	TEEC_Result result;
+	TEEC_Operation operation;
+	TEEC_SharedMemory TzShmClut;
+	TEEC_SharedMemory TzShmVbuf;
+	TEEC_SharedMemory *pShm;
+
+	VBUF_INFO *pVppDesc = Vbuf_phyAddr;
+	VPP_VBUF *pVBufInfo;
+
+	pVBufInfo = is_vpp_ta ? (VPP_VBUF*)pVppDesc->pVppVbufInfo_phy :
+					pVppDesc->pVppVbufInfo_virt;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	mutex_lock(&(TAVPPInstance[index].shm_mutex));
+
+	VPP_CA_DBG_PRINT("%s:%d: vbuf_info:%p, VbufSize:%x, Clut:%p, ClutSize:%x, PlaneID:%d, ClutValid:%d\n",
+		__func__, __LINE__, Vbuf_phyAddr, VbufSize, Clut_phyAddr, ClutSize, PlaneID, ClutValid);
+
+	memset(&operation, 0, sizeof(TEEC_Operation));
+	if (is_vpp_ta) {
+		/* register Vbuf info*/
+		memset(&TzShmVbuf, 0, sizeof(TEEC_SharedMemory));
+		//Need to pass the physical address instead of virtual address
+		TzShmVbuf.phyAddr = pVBufInfo;
+		TzShmVbuf.size = VbufSize;
+		TzShmVbuf.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+		result = TEEC_RegisterSharedMemory(&g_vppCaContext.context, &TzShmVbuf);
+		VPP_CA_DBG_PRINT("%s:%d: result:%x\n", __func__, __LINE__, result);
+	}
+
+	/* register Clut info*/
+	if (ClutValid) {
+		memset(&TzShmClut, 0, sizeof(TEEC_SharedMemory));
+		TzShmClut.phyAddr = Clut_phyAddr;
+		TzShmClut.size = ClutSize;
+		TzShmClut.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+		result = TEEC_RegisterSharedMemory(&g_vppCaContext.context, &TzShmClut);
+
+		operation.params[2].memref.parent = &TzShmClut;
+		operation.params[2].memref.size = TzShmClut.size;
+		operation.params[2].memref.offset = 0;
+		operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_MEMREF_WHOLE,
+			TEEC_MEMREF_WHOLE,
+			TEEC_VALUE_INOUT);
+	} else {
+		operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_MEMREF_WHOLE,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INOUT);
+	}
+
+	operation.params[0].value.a = ShmID;
+	if (is_vpp_ta) {
+		operation.params[1].memref.parent = &TzShmVbuf;
+		operation.params[1].memref.size = TzShmVbuf.size;
+	} else {
+		pShm = &(TAVPPInstance[index].Shm);
+		if (pShm && pShm->size < VbufSize) {
+			pr_err("%s:%d: pShm->size %zu, sInBufferSize %d\n",
+				__func__, __LINE__, pShm->size, VbufSize);
+			return -EINVAL;
+		}
+		memcpy(pShm->buffer, pVBufInfo, VbufSize);
+		operation.params[1].memref.parent = pShm;
+		operation.params[1].memref.size = pShm->size;
+	}
+	operation.params[1].memref.offset = 0;
+	operation.params[3].value.a = PlaneID;
+
+	/* clear result */
+	operation.params[3].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index, pSession, VPP_PASSSHM, &operation, NULL);
+
+	mutex_unlock(&(TAVPPInstance[index].shm_mutex));
+	return operation.params[3].value.b;
+}
+
+int VPP_CA_Init(VPP_INIT_PARM *vpp_init_parm)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int k;
+	UINT32 vpp_addr;
+	UINT32 ta_heapHandle;
+	TEEC_Operation operation2;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+		operation.paramTypes = TEEC_PARAM_TYPES(
+				TEEC_VALUE_INOUT,
+				TEEC_VALUE_OUTPUT,
+				TEEC_VALUE_INPUT,
+				TEEC_NONE);
+	operation.params[0].value.a = vpp_init_parm->iHDMIEnable;
+	operation.params[0].value.b = vpp_init_parm->iVdacEnable;
+
+#if defined(VPP_ENABLE_INTERNAL_MEM_MGR)
+	operation.params[2].value.a = vpp_init_parm->uiShmPA;
+	operation.params[2].value.b = vpp_init_parm->uiShmSize;
+#endif
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+	operation.params[1].value.b = 0x0;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_INIT,
+			&operation,
+			NULL);
+
+	VPP_TEEC_LOGIFERROR(result);
+
+	vpp_init_parm->g_vpp = operation.params[1].value.b;
+	vpp_addr = vpp_init_parm->g_vpp;
+#if defined(VPP_ENABLE_INTERNAL_MEM_MGR)
+	vpp_init_parm->gMemhandle = operation.params[0].value.b;
+	ta_heapHandle = vpp_init_parm->gMemhandle;
+#endif
+	operation2.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation2.params[1].value.a = 0xdeadbeef;
+	operation2.params[0].value.a = vpp_addr;
+#if defined(VPP_ENABLE_INTERNAL_MEM_MGR)
+	operation2.params[0].value.b = ta_heapHandle;
+#endif
+	operation2.started = 1;
+
+	for (k = TAVPP_API_INSTANCE; k < MAX_TAVPP_INSTANCE_NUM; k++) {
+		pSession = &(TAVPPInstance[k].session);
+		InvokeCommandHelper(k,
+			pSession,
+			VPP_INITIATE_VPPS,
+			&operation2,
+			NULL);
+	}
+
+	return operation.params[1].value.a;
+
+}
+
+int VPP_CA_Create(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_CREATE,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+
+int VPP_CA_Reset(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_RESET,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+
+int VPP_CA_ObjConfig(const int *pvinport_cfg, const int *pdv_cfg,
+		const int *pzorder_cfg, const int *pvoutport_cfg, const int *pfeature_cfg)
+{
+	int Ret;
+	static UINT8 cfg_mem[256];
+	int plane_size = sizeof(INT32)* (MAX_NUM_PLANES_ALL);
+	int vout_size = sizeof(INT32)* (MAX_NUM_VOUTS);
+	int feature_size = sizeof(INT32)* (MAX_NUM_FEATURE_CFG);
+
+	memcpy(&cfg_mem[0], pvinport_cfg, plane_size);
+	memcpy(&cfg_mem[plane_size], pdv_cfg, plane_size);
+	memcpy(&cfg_mem[(plane_size*2)], pzorder_cfg, plane_size);
+	memcpy(&cfg_mem[(plane_size*3)], pvoutport_cfg, vout_size);
+	memcpy(&cfg_mem[(plane_size*3)+vout_size], pfeature_cfg, feature_size);
+
+	Ret = VPP_CA_PassShm_InBuffer(&cfg_mem[0], VPP_OBJCONFIG, 256);
+
+	return Ret;
+}
+
+int VPP_CA_Config(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_CONFIG,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+int VPP_CA_IsrHandler(unsigned int MsgId, unsigned int IntSts)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+#ifdef TAVPP_USE_SEPARATE_ISR_INSTANCE
+	index = TAVPP_ISR_INSTANCE;
+#endif //TAVPP_USE_SEPARATE_ISR_INSTANCE
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = MsgId;
+	operation.params[0].value.b = IntSts;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_HANDLEINT,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[1].value.a;
+}
+
+
+int VPP_CA_SetOutRes(int CpcbId, int ResId, int BitDepth)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE);
+
+	operation.params[0].value.a = CpcbId;
+	operation.params[0].value.b = ResId;
+	operation.params[1].value.a = BitDepth;
+
+	/* clear result */
+	operation.params[2].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_SETRES,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[2].value.a;
+}
+
+int VPP_CA_OpenDispWin(int PlaneId, int WinX, int WinY, int WinW, int WinH, int BgClr, int Alpha)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INOUT);
+
+	operation.params[0].value.a = PlaneId;
+	operation.params[0].value.b = WinX;
+	operation.params[1].value.a = WinY;
+	operation.params[1].value.b = WinW;
+	operation.params[2].value.a = WinH;
+	operation.params[2].value.b = BgClr;
+	operation.params[3].value.a = Alpha;
+
+	/* clear result */
+	operation.params[3].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_OPENDISPWIN,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[3].value.b;
+}
+
+int VPP_CA_RecycleFrame(int PlaneId)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = PlaneId;
+
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_RECYCLEFRAME,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[1].value.a;
+}
+
+int VPP_CA_SetDispMode(int PlaneId, int Mode)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = PlaneId;
+	operation.params[0].value.b = Mode;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_SETDISPMODE,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[1].value.a;
+}
+
+int VPP_CA_HdmiSetVidFmt(int ColorFmt, int BitDepth, int PixelRep)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE);
+
+	operation.params[0].value.a = ColorFmt;
+	operation.params[0].value.b = BitDepth;
+	operation.params[1].value.a = PixelRep;
+
+	/* clear result */
+	operation.params[2].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_HDMISETVIDFMT,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[2].value.a;
+}
+
+
+int VPP_CA_SetRefWin(int PlaneId, int WinX, int WinY, int WinW, int WinH)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT);
+
+	operation.params[0].value.a = PlaneId;
+	operation.params[0].value.b = WinX;
+	operation.params[1].value.a = WinY;
+	operation.params[1].value.b = WinW;
+	operation.params[2].value.a = WinH;
+
+	/* clear result */
+	operation.params[3].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_SETREFWIN,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[3].value.a;
+}
+
+int VPP_CA_SetRefWinFromISR(int PlaneId, int WinX, int WinY, int WinW, int WinH)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT);
+
+	operation.params[0].value.a = PlaneId;
+	operation.params[0].value.b = WinX;
+	operation.params[1].value.a = WinY;
+	operation.params[1].value.b = WinW;
+	operation.params[2].value.a = WinH;
+
+	/* clear result */
+	operation.params[3].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_SETREFWINFROMISR,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[3].value.a;
+}
+
+int VPP_CA_ChangeDispWin(int PlaneId, int WinX, int WinY, int WinW, int WinH, int BgClr, int Alpha, ENUM_GLOBAL_ALPHA_FLAG globalAlphaFlag, bool isFromISR)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INOUT);
+
+	operation.params[0].value.a = 0;
+	VPP_ATTR_PARAM_SET_GLOBALPHA(operation.params[0].value.a, globalAlphaFlag);
+	VPP_ATTR_PARAM_SET_PLANEID(operation.params[0].value.a, PlaneId);
+	operation.params[0].value.b = WinX;
+	operation.params[1].value.a = WinY;
+	operation.params[1].value.b = WinW;
+	operation.params[2].value.a = WinH;
+	operation.params[2].value.b = BgClr;
+	operation.params[3].value.a = Alpha;
+
+	/* clear result */
+	operation.params[3].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	if (isFromISR)
+		result = InvokeCommandHelper(index, pSession, VPP_CHANGEDISPWINFROMISR, &operation, NULL);
+	else
+		result = InvokeCommandHelper(index, pSession, VPP_CHANGEDISPWIN, &operation, NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[3].value.b;
+}
+
+
+int VPP_CA_SetPlaneMute(int planeID, int mute)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = planeID;
+	operation.params[0].value.b = mute;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_SETPLANEMUTE,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[1].value.a;
+}
+
+int VPP_CA_Suspend(int enable)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+	VPP_CMD_ID cmd;
+
+	cmd = enable ? VPP_SUSPEND : VPP_RESUME;
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INOUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = 0xdeadbeef;
+	operation.params[0].value.b = 0;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			cmd,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+int VPP_CA_SetHdmiTxControl(int enable)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = enable;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_HDMISETTXCTRL,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[1].value.a;
+}
+
+int VPP_CA_stop(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_STOP,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+int VPP_CA_Destroy(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_DESTROY,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+#ifdef VPP_CA_ENABLE_PASS_VBUFINFO_BY_PARAMETER
+int VPP_CA_PassVbufInfoPar(unsigned int *Vbuf, unsigned int VbufSize,
+						 unsigned int *Clut, unsigned int ClutSize,
+						 int PlaneID, int ClutValid, VPP_SHM_ID ShmID)
+{
+	int index, i, flag;
+	TEEC_Session *pSession;
+	TEEC_Operation operation;
+	VBUF_INFO *pVBufInfo = (VBUF_INFO *) Vbuf;
+	TEEC_Result result;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+		TEEC_VALUE_INOUT,
+		TEEC_VALUE_INOUT,
+		TEEC_VALUE_INOUT,
+		TEEC_VALUE_INOUT);
+
+	for (i = 0; i < 5; i++) {
+		flag = 0;
+		switch (i) {
+		case 0:
+			operation.params[1].value.a = (unsigned int)((intptr_t)pVBufInfo->m_pbuf_start);
+			operation.params[1].value.b = pVBufInfo->m_bytes_per_pixel;
+			operation.params[2].value.a = pVBufInfo->m_bits_per_pixel;
+			operation.params[2].value.b = pVBufInfo->m_srcfmt;
+			operation.params[3].value.a = pVBufInfo->m_order;
+			flag = 1;
+			break;
+		case 1:
+			operation.params[1].value.a = pVBufInfo->m_content_width;
+			operation.params[1].value.b = pVBufInfo->m_content_height;
+			operation.params[2].value.a = pVBufInfo->m_buf_stride;
+			operation.params[2].value.b = pVBufInfo->m_buf_pbuf_start_UV;
+			operation.params[3].value.a = pVBufInfo->m_buf_size;
+			flag = 1;
+			break;
+		case 2:
+			operation.params[1].value.a = pVBufInfo->m_allocate_type;
+			operation.params[1].value.b = pVBufInfo->m_buf_type;
+			operation.params[2].value.a = pVBufInfo->m_buf_use_state;
+			operation.params[2].value.b = pVBufInfo->m_flags;
+			operation.params[3].value.a = pVBufInfo->m_is_frame_seq;
+			flag = 1;
+			break;
+		case 3:
+			operation.params[1].value.a = pVBufInfo->m_frame_rate_num;
+			operation.params[1].value.b = pVBufInfo->m_frame_rate_den;
+			operation.params[2].value.a = pVBufInfo->m_active_width;
+			operation.params[2].value.b = pVBufInfo->m_active_height;
+			operation.params[3].value.a = pVBufInfo->m_active_left;
+			flag = 1;
+			break;
+		case 4:
+			operation.params[1].value.a = pVBufInfo->m_active_top;
+			operation.params[1].value.b = pVBufInfo->m_content_offset;
+			operation.params[2].value.a = pVBufInfo->m_is_progressive_pic;
+			operation.params[2].value.b = pVBufInfo->m_hDesc;
+			flag = 1;
+			break;
+		}
+
+		if (flag) {
+			operation.params[0].value.a = (ShmID | (PlaneID << 8));
+			operation.params[0].value.b = i;
+			/* clear result */
+			operation.params[3].value.b = 0xdeadbeef;
+
+			operation.started = 1;
+			result = InvokeCommandHelper(index,
+					pSession,
+					VPP_PASSPAR,
+					&operation,
+					NULL);
+		}
+	}
+
+	return result;
+}
+#endif //VPP_CA_ENABLE_PASS_VBUFINFO_BY_PARAMETER
+
+
+int VPP_CA_SemOper(int cmd_id, int sem_id, int *pParam)
+{
+	int index;
+	TEEC_Session *pSession;
+	#ifdef VPP_CA_ENABLE_CMD_VPP_SEMOPER
+	TEEC_Result result;
+	#endif
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_INOUT);
+
+	operation.params[0].value.a = cmd_id;
+	operation.params[0].value.b = sem_id;
+	if (pParam)
+		operation.params[1].value.a = *pParam;
+
+	/* clear result */
+	operation.params[1].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	#ifdef VPP_CA_ENABLE_CMD_VPP_SEMOPER
+	result = InvokeCommandHelper(index, pSession, VPP_SEMOPER, &operation, NULL);
+	VPP_TEEC_LOGIFERROR(result);
+	#endif
+
+	if (pParam)
+		*pParam = operation.params[1].value.a;
+
+	return operation.params[1].value.b;
+}
+
+int VPP_CA_EnableHdmiAudioFmt(int enable)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INOUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = enable;
+
+	/* clear result */
+	operation.params[0].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_HDMIENABLEAUDIOFMT,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.b;
+}
+
+static int VPP_CA_PassShm(void *pBuffer, unsigned int shmCmdId, unsigned int sBufferSize)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+	TEEC_SharedMemory *pShm = (TEEC_SharedMemory *)pBuffer;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_MEMREF_WHOLE,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE);
+
+	operation.params[0].value.a = shmCmdId;
+	operation.params[1].memref.parent = pShm;
+	operation.params[1].memref.size = pShm->size;
+	operation.params[1].memref.offset = 0;
+
+	/* clear result */
+	operation.params[2].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_PASSSHM,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[2].value.a;
+}
+
+int VPP_CA_PassShm_InBuffer(void *pBuffer, unsigned int shmCmdId, unsigned int sInBufferSize)
+{
+	int index;
+	int Ret;
+	TEEC_SharedMemory *pShm;
+
+	index = VPP_CA_GetInstanceID();
+
+	pShm = &(TAVPPInstance[index].Shm);
+	if (pShm && pShm->size < sInBufferSize) {
+		pr_err("%s:%d: pShm->size %zu, sInBufferSize %d\n",
+			__func__, __LINE__, pShm->size, sInBufferSize);
+		return -EINVAL;
+	}
+
+	mutex_lock(&(TAVPPInstance[index].shm_mutex));
+	memcpy(pShm->buffer, pBuffer, sInBufferSize);
+	Ret = VPP_CA_PassShm(pShm, shmCmdId, sInBufferSize);
+
+	mutex_unlock(&(TAVPPInstance[index].shm_mutex));
+	return Ret;
+}
+
+int VPP_CA_PassShm_OutBuffer(void *pOutBuffer, unsigned int shmCmdId, unsigned int sOutBufferSize)
+{
+	int index;
+	int Ret;
+	TEEC_SharedMemory *pShm;
+
+	index = VPP_CA_GetInstanceID();
+
+	pShm = &(TAVPPInstance[index].Shm);
+
+	mutex_lock(&(TAVPPInstance[index].shm_mutex));
+	Ret = VPP_CA_PassShm(pShm,shmCmdId, sOutBufferSize);
+	if(!Ret) {
+		if(pShm)
+			memcpy(pOutBuffer,pShm->buffer,sOutBufferSize);
+	} else {
+		pr_err("VPP_CA_PassShm Fail\n err:%d",Ret);
+	}
+	mutex_unlock(&(TAVPPInstance[index].shm_mutex));
+
+	return Ret;
+}
+
+int VPP_CA_PassShm_InOutBuffer(void *pInBuffer, void *pOutBuffer,
+				VPP_SHM_ID shmCmdId, UINT32 sInBufferSize, UINT32 sOutBufferSize)
+{
+	int index;
+	int Ret;
+	TEEC_SharedMemory *pShm;
+
+	if (!pOutBuffer)
+		return MV_VPP_EBADPARAM;
+
+	index = VPP_CA_GetInstanceID();
+
+	pShm = &(TAVPPInstance[index].Shm);
+	if (pShm && pShm->size < sInBufferSize) {
+		pr_err("%s:%d: pShm->size %zu, sInBufferSize %d\n",
+			__func__, __LINE__, pShm->size, sInBufferSize);
+		return -EINVAL;
+	}
+
+	mutex_lock(&(TAVPPInstance[index].shm_mutex));
+
+	if (pInBuffer)
+		memcpy(pShm->buffer, pInBuffer, sInBufferSize);
+	else
+		memset(pShm->buffer, 0, sInBufferSize);
+
+	Ret = VPP_CA_PassShm(pShm, shmCmdId, sOutBufferSize);
+	if (pOutBuffer)
+		memcpy(pOutBuffer, pShm->buffer, sOutBufferSize);
+
+	mutex_unlock(&(TAVPPInstance[index].shm_mutex));
+
+	return Ret;
+}
+
+int VPP_CA_GetCPCBOutputPixelClock(int resID,  int *pixel_clock)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = resID;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+	operation.params[1].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_GETCPCBOUTPIXELCLOCK,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+	*pixel_clock = operation.params[1].value.a;
+
+	return operation.params[1].value.b;
+}
+
+int VPP_CA_AVIOReset(void)
+{
+	int index;
+	TEEC_Session *pSession;
+	TEEC_Result result;
+	TEEC_Operation operation;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_AVIORESET,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	return operation.params[0].value.a;
+}
+
+int VPP_CA_GetHPDStatus(unsigned char *pHpdStatus)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+					TEEC_VALUE_OUTPUT,
+					TEEC_NONE,
+					TEEC_NONE,
+					TEEC_NONE);
+
+	/* clear result */
+	operation.params[0].value.a = 0xdeadbeef;
+	operation.params[0].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+					pSession,
+					VPP_GETHPDSTATUS,
+					&operation,
+					NULL);
+	VPP_TEEC_LOGIFERROR(result);
+	*pHpdStatus = (operation.params[0].value.a & 0x01) ? true : false;
+
+	return operation.params[0].value.b;
+}
+
+int VPP_CA_GetBlockStatus(ENUM_VPP_BLOCK BlkId, int BlkSubId, int *status)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE,
+			TEEC_NONE);
+
+	operation.params[0].value.a = BlkSubId;
+	operation.params[0].value.b = BlkId;
+
+	/* clear result */
+	operation.params[1].value.a = 0xdeadbeef;
+	operation.params[1].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_GET_BLOCK_STATUS,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+	*status = operation.params[1].value.a;
+
+	return operation.params[1].value.b;
+}
+
+int VPP_CA_GetDispWindow(int PlaneId, int *WinX, int *WinY, int *WinW, int *WinH,
+			int *BgClr, int *Alpha, ENUM_GLOBAL_ALPHA_FLAG *globalAlphaFlag)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INOUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_VALUE_OUTPUT);
+
+	operation.params[0].value.a = PlaneId;
+
+	/* clear result */
+	operation.params[0].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_GETDISPWINDOW,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	*WinX = operation.params[1].value.a;
+	*WinY = operation.params[1].value.b;
+	*WinW = operation.params[2].value.a;
+	*WinH = operation.params[2].value.b;
+	*BgClr = operation.params[3].value.a;
+	*Alpha = operation.params[3].value.b;
+	*globalAlphaFlag = operation.params[0].value.a;
+
+	return operation.params[0].value.b;
+}
+
+int VPP_CA_GetRefWindow(int PlaneId, int *WinX, int *WinY, int *WinW, int *WinH)
+{
+	TEEC_Result result;
+	TEEC_Operation operation;
+	int index;
+	TEEC_Session *pSession;
+	index = VPP_CA_GetInstanceID();
+	pSession = &(TAVPPInstance[index].session);
+
+	operation.paramTypes = TEEC_PARAM_TYPES(
+			TEEC_VALUE_INOUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_VALUE_OUTPUT,
+			TEEC_NONE);
+
+	operation.params[0].value.a = PlaneId;
+
+	/* clear result */
+	operation.params[0].value.b = 0xdeadbeef;
+
+	operation.started = 1;
+	result = InvokeCommandHelper(index,
+			pSession,
+			VPP_GETREFWINDOW,
+			&operation,
+			NULL);
+	VPP_TEEC_LOGIFERROR(result);
+
+	*WinX = operation.params[1].value.a;
+	*WinY = operation.params[1].value.b;
+	*WinW = operation.params[2].value.a;
+	*WinH = operation.params[2].value.b;
+
+	return operation.params[0].value.b;
+}

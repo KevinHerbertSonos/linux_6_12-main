@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Input misc drivers configuration
+#
+
+config INPUT_FORCEMUTE
+	tristate "Synaptics Forcemute support"
+	help
+	  Say Y here to enable the Synaptics forcemute support. An
+	  input event will be triggered upon a forcemute interrupt.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called forcemute.
+

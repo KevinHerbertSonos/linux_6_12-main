@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# SPI driver configuration
+#
+menuconfig SYNAPTICS_SPI
+  bool "Synaptics spi driver support"
+  default y
+  help
+    Synaptics spi driver support
+
+if SYNAPTICS_SPI
+
+config SPI_DSPG_DMW
+	tristate "DSP Group DMW96 style SPI controller"
+	depends on HAS_DMA
+	depends on OF
+	select SPI_BITBANG
+	select DMADEVICES
+	select DVF_GDMAC
+	help
+	  SPI master driver for DMW96 style controllers.
+
+config SPI_DSPG_DCX
+	tristate "DSP Group DCX81 style SPI controller"
+	depends on OF
+	select SPI_BITBANG
+	help
+	  SPI master driver for DCX81 style controllers.
+
+endif

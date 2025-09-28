@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTD_NAND_DSPG
+	tristate "Support for DSPG NAND controller"
+	help
+		Enables support for DSPG NAND flash controllers.

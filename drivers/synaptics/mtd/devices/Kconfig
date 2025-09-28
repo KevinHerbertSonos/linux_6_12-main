@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTD_DSPG_QSPIC
+	tristate "DSPG QSPI controller"
+	help
+	  This provides a MTD device driver for the DSPG QSPI controller. The
+	  driver supports various DataFlash devices on both chip selects of the
+	  controller.

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0
+
+
+menuconfig SYNAPTICS_BLUETOOTH
+  bool "Synaptics bluetooth driver support"
+  default y
+  help
+    Synaptics bluetooth driver support
+
+if SYNAPTICS_BLUETOOTH
+
+config BT_RFKILL
+	tristate "Synaptics bluetooth rfkill"
+	default n
+	help
+	  Synaptics bluetooth rfkill
+
+
+config BT_LPM
+	tristate "Synaptics bluetooth lpm"
+	default n
+	help
+	  Synaptics bluetooth lpm
+
+endif

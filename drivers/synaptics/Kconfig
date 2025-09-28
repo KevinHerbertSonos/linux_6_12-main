@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Synaptics driver config
+#
+
+menu "Synaptics drivers"
+
+source "drivers/synaptics/clk/Kconfig"
+
+source "drivers/synaptics/pinctrl/Kconfig"
+
+source "drivers/synaptics/mmc/Kconfig"
+
+source "drivers/synaptics/usb/Kconfig"
+
+source "drivers/synaptics/pci/Kconfig"
+
+source "drivers/synaptics/regulator/Kconfig"
+
+source "drivers/synaptics/phy/Kconfig"
+
+source "drivers/synaptics/hwmon/Kconfig"
+
+source "drivers/synaptics/i2c/Kconfig"
+
+source "drivers/synaptics/soc/Kconfig"
+
+source "drivers/synaptics/net/Kconfig"
+
+source "drivers/synaptics/video/Kconfig"
+
+source "drivers/synaptics/sound/Kconfig"
+
+source "drivers/synaptics/devfreq/Kconfig"
+
+source "drivers/synaptics/dma-buf/Kconfig"
+
+source "drivers/synaptics/irqchip/Kconfig"
+
+source "drivers/synaptics/input/Kconfig"
+
+source "drivers/synaptics/bluetooth/Kconfig"
+
+source "drivers/synaptics/clocksource/Kconfig"
+
+source "drivers/synaptics/dma/Kconfig"
+
+source "drivers/synaptics/gpu/trace/Kconfig"
+
+source "drivers/synaptics/tty/Kconfig"
+
+source "drivers/synaptics/leds/Kconfig"
+
+source "drivers/synaptics/mfd/Kconfig"
+
+source "drivers/synaptics/misc/Kconfig"
+
+source "drivers/synaptics/mtd/Kconfig"
+
+source "drivers/synaptics/pwm/Kconfig"
+
+source "drivers/synaptics/reset/Kconfig"
+
+source "drivers/synaptics/rtc/Kconfig"
+
+source "drivers/synaptics/spi/Kconfig"
+
+source "drivers/synaptics/staging/Kconfig"
+
+source "drivers/synaptics/watchdog/Kconfig"
+
+source "drivers/synaptics/mailbox/Kconfig"
+
+source "drivers/synaptics/rpmsg/Kconfig"
+
+source "drivers/synaptics/hrx-v4l2/Kconfig"
+
+endmenu

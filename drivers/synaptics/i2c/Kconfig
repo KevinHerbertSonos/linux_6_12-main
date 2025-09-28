@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# I2C subsystem configuration
+#
+
+menuconfig SYNAPTICS_I2C
+  bool "Synaptics i2c driver support"
+  default y
+  help
+    Synaptics i2c driver support
+
+if SYNAPTICS_I2C
+
+source "drivers/synaptics/i2c/muxes/Kconfig"
+
+endif

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig SYNAPTICS_DMABUF
+  bool "Synaptics dma buf driver support"
+  default y
+  help
+    Synaptics dma buf driver support
+
+if SYNAPTICS_DMABUF
+
+source "drivers/synaptics/dma-buf/heaps/Kconfig"
+
+endif

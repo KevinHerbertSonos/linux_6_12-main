@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menuconfig SYNAPTICS_REGULATOR
+  bool "Synaptics regulator driver support"
+  default y
+  help
+    Synaptics regulator driver support
+
+if SYNAPTICS_REGULATOR
+
+config REGULATOR_HL7593
+	tristate "Halo HL7593 regulator"
+	depends on I2C && (OF || COMPILE_TEST)
+	select REGMAP_I2C
+	help
+	  This driver supports HL7593 single output regulator.
+
+config REGULATOR_DVF9A
+	tristate "DSPG-DVF9A PMU"
+	depends on MFD_DSPG_DVF9A
+	help
+	  This driver provides support for the voltage regulators on the
+	  DSPG-DVF9A PMU.
+
+config REGULATOR_DVFA10_LDO_DSI
+	tristate "DSPG-DVFA10 LDO DSI"
+	depends on MFD_DSPG_DVF9A
+	help
+	  This driver provides support for the LDO DSI voltage regulator
+	  on the DSPG-DVFA10 PMU.
+
+config REGULATOR_RPI_PANEL_ATTINY
+	tristate "ATtiny RPI Panel Regulator"
+	depends on I2C && (OF || COMPILE_TEST)
+	select REGMAP_I2C
+	help
+	  This driver provides support for the ATtiny RPI panel regulator.
+
+endif
+

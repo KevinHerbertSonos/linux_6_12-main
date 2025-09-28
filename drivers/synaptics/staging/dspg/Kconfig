@@ -1,0 +1,61 @@
+menuconfig DSPG
+	bool "DSPG Drivers"
+	default n
+
+if DSPG
+
+config DSPG_SEC
+	bool "Semaphore Exchange Center (SEC)"
+
+config DSPG_CSS
+	depends on DSPG_SEC
+	bool "CSS firmware loader"
+
+source "drivers/synaptics/staging/dspg/coma/Kconfig"
+
+config DESIGNWARE_DSI
+	default n
+	bool "Synopsys DesignWare DSI driver"
+
+config DSPG_CRYPTO
+	bool "DSPG Cryptograpic security module"
+	help
+	  Enable support for the Crypthograpic security module of DSPG.
+
+config DSPG_DDR_PERF
+	tristate "DDR Performance Counters"
+	depends on SYSFS
+	help
+	  Enable sysfs interface for DDR performance counters.
+
+config DSPG_DDR_PMU
+	bool "DDR PMU for DVF101"
+	help
+	  Enable support for the PMU Framework for DDR.
+
+config DSPG_TPS65132B2
+	tristate "DSPG TPS65132B2 driver"
+	depends on I2C
+	depends on OF_GPIO
+	default n
+	help
+	  TPS65132B2 dual voltage out
+
+config DSPG_PIOG
+	tristate "DSPG PIO Guardian"
+	depends on OF_GPIO
+	default n
+
+config DSPG_CPUFREQ
+	tristate "DSPG CPU frequency scaling driver"
+	depends on OF
+	default n
+
+if I2C_SLAVE
+
+config I2C_SLAVE_DVF99
+       tristate "I2C DVF99 slave driver"
+
+endif
+
+endif

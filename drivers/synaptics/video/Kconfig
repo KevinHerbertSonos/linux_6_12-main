@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Video configuration
+#
+
+menuconfig SYNAPTICS_VIDEO
+  bool "Synaptics video driver support"
+  default y
+  help
+    Synaptics video driver support
+
+if SYNAPTICS_VIDEO
+
+source "drivers/synaptics/video/syna/Kconfig"
+
+source "drivers/synaptics/video/fbdev/Kconfig"
+
+source "drivers/synaptics/video/backlight/Kconfig"
+
+source "drivers/synaptics/gpu/dsi/Kconfig"
+
+source "drivers/synaptics/gpu/arm/mali/Kconfig"
+
+source "drivers/synaptics/gpu/vivante/Kconfig"
+
+endif

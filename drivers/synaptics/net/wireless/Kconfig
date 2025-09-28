@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Wireless LAN device configuration
+#
+
+config BCMDHD103
+	bool "BCMDHD103"
+	default n
+
+config BCMDHD591
+	bool "BCMDHD591"
+	default n
+
+config BCMDHD361
+	bool "BCMDHD361"
+	default n
+
+source "drivers/synaptics/net/wireless/bcmdhd/Kconfig"
+if BCMDHD103
+source "drivers/synaptics/net/wireless/bcmdhd103/Kconfig"
+endif
+if BCMDHD591
+source "drivers/synaptics/net/wireless/bcmdhd591/Kconfig"
+endif
+if BCMDHD361
+source "drivers/synaptics/net/wireless/bcmdhd361/Kconfig"
+endif

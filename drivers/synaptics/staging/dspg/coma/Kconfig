@@ -1,0 +1,71 @@
+config CFIFO_CHECKS
+	bool "CFIFO runtime checks"
+	depends on DSPG_CSS
+	help
+	  Say Y here to enable runtime checks that verify the integrity of
+	  CFIFOs as they are used. This adds some overhead which is
+	  unnecessary, except for debugging.
+
+	  If unsure, say N.
+
+config DSPG_COMA_MAX_SERVICES
+	int "Maximum number of services"
+	depends on DSPG_CSS
+	default 16
+	help
+	  Sets the maximum number of simultaneously active COMA services in the
+	  kernel.
+
+config DSPG_COMA_SOCKET
+	bool "COMA socket family support"
+	depends on DSPG_CSS && NET
+	default y
+	help
+	  Say Y here to enable support for the COMA scket family. This socket
+	  family is used by user space processes to connect to services of the
+	  cordless domain.
+
+config DSPG_CSS_VOICE
+	bool "COMA voice/RTP service"
+	depends on DSPG_CSS
+	help
+	  Character device interface for passing RTP streams between CSS and
+	  UDP sockets.
+
+config CORDLESS_NUM_VOICELINES
+	int "Voice Channels"
+	depends on DSPG_CSS_VOICE
+	default 16
+	help
+	  Number of VOICE channels
+
+config CORDLESS_USER_SPACE_FIFOS
+	bool "User Space CFIFO handling"
+	depends on DSPG_CSS_VOICE
+	default n
+	help
+	  CFIFOs are handled in user-space.
+
+config DSPG_CSS_TDM
+	bool "COMA TDM service"
+	depends on DSPG_CSS
+	help
+	  Interface for passing ownership of TDM interfaces to the CSS.
+
+config DSPG_CSS_DVF9A
+	bool "COMA DVF9A service"
+	depends on DSPG_CSS && MFD_DSPG_DVF9A
+	help
+	  Interface for accessing the DVF9A through DAIF and handling interrupts
+
+config DSPG_CSS_ALSA
+	bool "COMA ALSA service"
+	depends on DSPG_CSS
+	help
+	  Interface for PCM ALSA
+
+config DSPG_CSS_SHAREDMEM
+	bool "COMA SHAREDMEM service"
+	depends on DSPG_CSS
+	help
+	  Interface for the shared memory service (/dev/sharedmem)

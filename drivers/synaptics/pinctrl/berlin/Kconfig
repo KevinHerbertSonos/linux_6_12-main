@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if (ARCH_BERLIN || COMPILE_TEST)
+
+config PINCTRL_BERLIN
+	tristate "Synaptics berlin pin controller driver lib"
+	select PINMUX
+	select GENERIC_PINCONF
+	select REGMAP_MMIO
+
+config PINCTRL_AS370
+	bool "Synaptics as370 pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+config PINCTRL_MYNA
+	bool "Synaptics myna pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+config PINCTRL_MYNA2
+	tristate "Synaptics myna2 pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+config PINCTRL_PLATYPUS
+	tristate "Synaptics PLATYPUS pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+config PINCTRL_DOLPHIN
+	tristate "Synaptics DOLPHIN pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+config PINCTRL_SL261X
+	tristate "Synaptics SL261X pin controller driver"
+	depends on OF
+	select PINCTRL_BERLIN
+
+endif

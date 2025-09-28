@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# DMA engine configuration
+#
+
+menuconfig SYNAPTICS_DMA
+  bool "Synaptics dma driver support"
+  default y
+  help
+    Synaptics dma driver support
+
+if SYNAPTICS_DMA
+
+config ARM_DMA350
+	tristate "Arm DMA-350 support"
+	select DMA_ENGINE
+	select DMA_VIRTUAL_CHANNELS
+	default n
+	help
+	  Enable support for the Arm DMA-350 controller.
+
+config DVF_GDMAC
+	tristate "DSPG DVF GDMAC support"
+	depends on ARCH_DVF101 || ARCH_DVF
+	select DMA_ENGINE
+	select DMA_VIRTUAL_CHANNELS
+	default y
+	help
+	  Enable support for DSPG's DVF GDMAC.
+
+endif

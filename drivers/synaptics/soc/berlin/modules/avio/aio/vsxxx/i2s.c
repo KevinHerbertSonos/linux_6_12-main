@@ -1,0 +1,1263 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright (C) 2019-2020 Synaptics Incorporated */
+
+#include "aio_hal.h"
+#include "aio_common.h"
+#include "i2s_common.h"
+#include "avioDhub.h"
+#include <linux/delay.h>
+#include "avioGbl.h"
+
+enum aio_hdmi_lpcm_src_option {
+	AIO_HDMI_LPCM_SRC_64b = 1,
+	AIO_HDMI_LPCM_SRC_256b = 3
+};
+
+#define __SET32MIC4_RXPORT_ENABLE(r32, v)	_BFSET_(r32, 0, 0, v)
+#define __SET32MIC5_RXPORT_ENABLE(r32, v)	_BFSET_(r32, 0, 0, v)
+
+static void aio_trace_reg(struct aio_priv *aio,
+	const char *name, u32 add, u32 val)
+{
+	pr_debug("%s: %p@%08x --> %08x\n", name, aio->pbase, add, val);
+}
+
+u32 __weak get_intl_base_addr_extra(u32 id)
+{
+	return INVALID_ADDRESS;
+}
+
+static u32 aio_get_intl_base_addr(u32 id)
+{
+	u32 address;
+
+	switch (id) {
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_INTLMODE;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MIC2 + RA_MIC2_INTLMODE;
+		break;
+	case AIO_ID_MIC6_RX:
+		address = get_intl_base_addr_extra(id);
+		break;
+	default:
+		/* will return AIO PRI address*/
+		pr_warn("%s: id(%d) not supported\n", __func__, id);
+		return INVALID_ADDRESS;
+	}
+
+	return address;
+}
+
+u32 __weak aio_get_offset_extra_plus(u32 ID, u32 tsd)
+{
+	return 0;
+}
+
+static u32 aio_get_offset_extra(u32 ID, u32 tsd)
+{
+	u32 offset = 0;
+
+	switch (ID) {
+	case AIO_ID_HDMI_TX:
+		offset = RA_AIO_HDMI + RA_HDMI_HDTSD;
+		break;
+	case AIO_ID_MIC4_RX:
+		if (tsd == AIO_TSD0)
+			offset = RA_AIO_MIC4 + RA_MIC4_RSD0;
+		else
+			offset = RA_AIO_MIC4 + RA_MIC4_RSD1 +
+					sizeof(SIE_AUDCH) * (tsd - 1);
+		break;
+	case AIO_ID_MIC5_RX:
+		if (tsd == AIO_TSD0)
+			offset = RA_AIO_MIC5 + RA_MIC5_RSD0;
+		else
+			offset = RA_AIO_MIC5 + RA_MIC5_RSD1 +
+					sizeof(SIE_AUDCH) * (tsd - 1);
+		break;
+	case AIO_ID_SPDIF_TX:
+		offset = I2S_SPDIF_OFFSET;
+		break;
+	case AIO_ID_MIC6_RX:
+		offset = aio_get_offset_extra_plus(ID, tsd);
+		break;
+	default:
+		offset = 0;
+		break;
+	}
+
+	return offset;
+}
+
+u32 __weak aio_get_addr_extra_plus(u32 id)
+{
+	return INVALID_ADDRESS;
+}
+
+static u32 aio_get_addr_extra(u32 id)
+{
+	u32 address;
+
+	switch (id) {
+	case AIO_ID_HDMI_TX:
+		address = RA_AIO_HDMI + RA_HDMI_HDAUD;
+		break;
+	case AIO_ID_MIC4_RX:
+		address = RA_AIO_MIC4 + RA_MIC4_MICCTRL;
+		break;
+	case AIO_ID_MIC5_RX:
+		address = RA_AIO_MIC5 + RA_MIC5_MICCTRL;
+		break;
+	case AIO_ID_MIC6_RX:
+		address = aio_get_addr_extra_plus(id);
+		break;
+	default:
+		/* will return AIO PRI address*/
+		pr_warn("%s: id(%d) not supported\n", __func__, id);
+		return INVALID_ADDRESS;
+	}
+
+	return address;
+}
+
+int aio_setirq(void *hd,
+		u32 pri, u32 sec,
+		u32 mic, u32 spdif, u32 hdmi)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32AIO_IRQENABLE reg;
+
+	address = RA_AIO_IRQENABLE;
+	reg.u32 = aio_read(aio, address);
+	reg.uIRQENABLE_PRIIRQ = pri;
+	reg.uIRQENABLE_SECIRQ = sec;
+	reg.uIRQENABLE_MIC1IRQ = mic;
+	reg.uIRQENABLE_MIC2IRQ = mic;
+	reg.uIRQENABLE_SPDIFIRQ = spdif;
+	reg.uIRQENABLE_HDMIIRQ = hdmi;
+	aio_write(aio, address, reg.u32);
+	return 0;
+}
+EXPORT_SYMBOL(aio_setirq);
+
+int aio_selhdport(void *hd, u32 sel)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32HDMI_HDPORT reg;
+	u32 address;
+
+	address = RA_AIO_HDMI + RA_HDMI_HDPORT;
+	reg.u32 = aio_read(aio, address);
+	reg.uHDPORT_TXSEL = sel;
+	aio_write(aio, address, reg.u32);
+	return 0;
+}
+EXPORT_SYMBOL(aio_selhdport);
+
+int aio_selhdsource(void *hd, u32 sel)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32AIO_HDSRC reg;
+	u32 address;
+
+	address = RA_AIO_HDSRC;
+	reg.u32 = aio_read(aio, address);
+	reg.uHDSRC_SEL = sel;
+	aio_write(aio, address, reg.u32);
+	return 0;
+}
+EXPORT_SYMBOL(aio_selhdsource);
+
+int aio_i2s_mclk_ctrl(void *hd, u32 id, u32 en)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32ACLK_ACLK_CTRL reg;
+	u32 address;
+	u32 val;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_MCLKPRI;
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_MCLKSEC;
+		break;
+	case AIO_ID_MIC_RX:
+		address = RA_AIO_MCLKMIC1;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MCLKMIC2;
+		break;
+	case AIO_ID_HDMI_TX:
+		address = RA_AIO_MCLKHD;
+		break;
+	case AIO_ID_SPDIF_TX:
+		address = RA_AIO_MCLKSPF;
+		break;
+	case AIO_ID_PDM_RX:
+		address = RA_AIO_MCLKPDM;
+		break;
+	default:
+		pr_err("%s, id(%d) not supported\n", __func__, id);
+		return -EINVAL;
+	}
+
+	reg.u32 = aio_read(aio, address);
+	val = reg.u32;
+	reg.uACLK_CTRL_clk_Enable = en ? 1 : 0;
+
+	if (val != reg.u32) {
+		aio_write(aio, address, reg.u32);
+		dev_dbg(aio->dev, "%s: chid%d mclk en %d\n", __func__, id, en);
+	} else {
+		dev_dbg(aio->dev, "%s: chid%d mclk  already set to %d\n", __func__, id, en);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_i2s_mclk_ctrl);
+
+int aio_i2s_set_clock(void *hd, u32 id, u32 clkSwitch,
+	 u32 clkD3Switch, u32 clkSel, u32 pllUsed, u32 en)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32ACLK_ACLK_CTRL reg;
+	u32 address;
+	u32 val;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_MCLKPRI;
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_MCLKSEC;
+		break;
+	case AIO_ID_MIC_RX:
+		address = RA_AIO_MCLKMIC1;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MCLKMIC2;
+		break;
+	case AIO_ID_HDMI_TX:
+		address = RA_AIO_MCLKHD;
+		break;
+	case AIO_ID_SPDIF_TX:
+		address = RA_AIO_MCLKSPF;
+		break;
+	case AIO_ID_PDM_RX:
+		address = RA_AIO_MCLKPDM;
+		break;
+	default:
+		pr_err("%s, id(%d) not supported\n", __func__, id);
+		return -EINVAL;
+	}
+
+	reg.u32 = aio_read(aio, address);
+	val = reg.u32;
+	reg.uACLK_CTRL_clkSwitch = clkSwitch;
+	reg.uACLK_CTRL_clkD3Switch = clkD3Switch;
+	reg.uACLK_CTRL_clkSel = clkSel;
+	reg.uACLK_CTRL_src_sel = pllUsed;
+	reg.uACLK_CTRL_clk_Enable = en ? 1 : 0;
+
+	if (val != reg.u32) {
+		/* toggle sw_sync_rst bit to do reset */
+		reg.uACLK_CTRL_sw_sync_rst = 0;
+		aio_write(aio, address, reg.u32);
+		usleep_range(1000, 2000);
+		reg.uACLK_CTRL_sw_sync_rst = 1;
+		aio_write(aio, address, reg.u32);
+		pr_info("%s: %p@%08x --> %08x\n", __func__, aio->pbase, address, reg.u32);
+	} else {
+		pr_info("%s: %p@%08x already %08x\n", __func__, aio->pbase, address, reg.u32);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_i2s_set_clock);
+
+int aio_i2s_clk_sync_reset(void *hd, u32 id)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32ACLK_ACLK_CTRL reg;
+	u32 address;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_MCLKPRI;
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_MCLKSEC;
+		break;
+	case AIO_ID_MIC_RX:
+		address = RA_AIO_MCLKMIC1;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MCLKMIC2;
+		break;
+	case AIO_ID_HDMI_TX:
+		address = RA_AIO_MCLKHD;
+		break;
+	case AIO_ID_SPDIF_TX:
+		address = RA_AIO_MCLKSPF;
+		break;
+	case AIO_ID_PDM_RX:
+		address = RA_AIO_MCLKPDM;
+		break;
+	default:
+		pr_err("%s, id(%d) not supported\n", __func__, id);
+		return -EINVAL;
+	}
+
+	reg.u32 = aio_read(aio, address);
+
+	/* toggle sw_sync_rst bit to do reset */
+	reg.uACLK_CTRL_sw_sync_rst = 0;
+	aio_write(aio, address, reg.u32);
+	usleep_range(1000, 2000);
+	reg.uACLK_CTRL_sw_sync_rst = 1;
+	aio_write(aio, address, reg.u32);
+	pr_info("%s: %p@%08x --> %08x\n", __func__, aio->pbase, address, reg.u32);
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_i2s_clk_sync_reset);
+
+u32 aio_get_tsd_from_chid(void *hd, u32 chid)
+{
+	u32 tsd = MAX_TSD;
+
+	switch (chid) {
+	case avioDhubChMap_aio64b_MIC1_CH_W:
+		tsd = AIO_TSD0;
+		break;
+
+	default:
+		tsd = MAX_TSD;
+	}
+
+	return tsd;
+}
+EXPORT_SYMBOL(aio_get_tsd_from_chid);
+
+int aio_set_xfeed_mode(void *hd, s32 i2sid, u32 lrclk, u32 bclk)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32AIO_XFEED reg;
+	u32 offset;
+
+	offset = RA_AIO_XFEED;
+	reg.u32 = aio_read(aio, offset);
+
+	switch (i2sid) {
+	case I2S1_ID:
+		reg.uXFEED_I2S1_LRCKIO_MODE = lrclk;
+		reg.uXFEED_I2S1_BCLKIO_MODE = bclk;
+		break;
+	case I2S2_ID:
+		reg.uXFEED_I2S2_LRCKIO_MODE = lrclk;
+		reg.uXFEED_I2S2_BCLKIO_MODE = bclk;
+		break;
+	case I2S3_ID:
+		reg.uXFEED_I2S3_LRCKIO_MODE = lrclk;
+		reg.uXFEED_I2S3_BCLKIO_MODE = bclk;
+		break;
+	default:
+		pr_err("%s, id(%d) is not supported\n", __func__, i2sid);
+		return -EINVAL;
+	}
+	aio_write(aio, offset, reg.u32);
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_xfeed_mode);
+
+static void aio_set_prisrc(void *hd, u32 src, u8 *map_val)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	TAIO_PRISRC reg;
+	u32 address = RA_AIO_PRISRC;
+
+	reg.u32[0] = aio_read(aio, address);
+	reg.uPRISRC_SEL = src;
+
+	reg.uPRISRC_L0DATAMAP = map_val[0];
+
+	if (src > 0)
+		reg.uPRISRC_L1DATAMAP = map_val[1];
+
+	if (src > 1)
+		reg.uPRISRC_L2DATAMAP = map_val[2];
+
+	if (src > 2)
+		reg.uPRISRC_L3DATAMAP = map_val[3];
+
+	aio_write(aio, address, reg.u32[0]);
+}
+
+static void aio_set_secsrc(void *hd, u32 src, u8 *map_val)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	TAIO_SECSRC reg;
+	u32 address = RA_AIO_SECSRC;
+
+	reg.u32[0] = aio_read(aio, address);
+	reg.uSECSRC_SEL = src;
+
+	reg.uSECSRC_L0DATAMAP = map_val[0];
+
+	if (src > 0)
+		reg.uSECSRC_L1DATAMAP = map_val[1];
+
+	if (src > 1)
+		reg.uSECSRC_L2DATAMAP = map_val[2];
+
+	if (src > 2)
+		reg.uSECSRC_L3DATAMAP = map_val[3];
+
+	aio_write(aio, address, reg.u32[0]);
+}
+
+int aio_set_interleaved_mode(void *hd, u32 id, u32 src, u32 ch_map)
+{
+	u8 map_val[4] = {ch_map & 0x3, (ch_map >> 2) & 0x3,
+		(ch_map >> 4) & 0x3, (ch_map >> 6) & 0x3};
+	u8 i;
+
+	if (src > 3) {
+		pr_err("%s, src(%d) not supported\n", __func__, src);
+		return -EINVAL;
+	}
+
+	for (i = 0; i <= src; i++)
+		if (map_val[i] > src) {
+			pr_err("%s, map(0x%x) not supported\n",
+				    __func__, ch_map);
+			return -EINVAL;
+		}
+
+	pr_info("%s: id:%d src:%d ch_map:0x%08x\n", __func__, id, src, ch_map);
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		aio_set_prisrc(hd, src, map_val);
+		break;
+	case AIO_ID_SEC_TX:
+		aio_set_secsrc(hd, src, map_val);
+		break;
+	default:
+		pr_err("%s, id(%d) not supported\n", __func__, id);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_interleaved_mode);
+
+static int aio_get_pri_channel_num(u32 tdm, u32 tdmchcnt, u32 src)
+{
+	if (tdm)
+		return (src + 1) * tdmchcnt;
+	else
+		return (src + 1)*2;
+}
+
+static int aio_configure_pri_lpbk(struct aio_priv *aio,
+				 u8 chan_num, u8 dummy_data)
+{
+	TAIO_PRISRC reg_prisrc;
+	T32PRIAUD_CLKDIV reg_clkdiv;
+	T32PRIAUD_CTRL reg_mic4ctrl;
+	T32PRIAUD_CTRL reg_prictrl;
+	T32MIC4_HBRDMAP reg_hbrmap;
+	T32MIC4_INTLMODE reg_intlmode;
+	TMIC4_RXDATA  reg_rxdata;
+	u32 address;
+
+	/* AIO_MIC4_MICCTRL_CLKDIV */
+	address = RA_AIO_MIC4 + RA_MIC4_MICCTRL + RA_PRIAUD_CLKDIV;
+	reg_clkdiv.uCLKDIV_SETTING = 0;
+	aio_write(aio, address, reg_clkdiv.u32);
+	aio_trace_reg(aio, "AIO_MIC4_MICCTRL_CLKDIV", address, reg_clkdiv.u32);
+
+	/* Read AIO_PRI_PRIAUD_CTRL configuration */
+	address = RA_AIO_PRI + RA_PRI_PRIAUD + RA_PRIAUD_CTRL;
+	reg_prictrl.u32 = aio_read(aio, address);
+	aio_trace_reg(aio, "AIO_PRI_PRIAUD_CTRL", address, reg_prictrl.u32);
+
+	/*	Update AIO_MIC4_MICCTRL_CTRL register. Clone AIO_PRI_PRIAUD_CTRL configuration
+	 *	as loopback should share the same configuration as primary I2S. Except for
+	 *	uCTRL_INVCLK and uCTRL_INVFS as playback and capture have different sample and
+	 *	latch polarity.
+	 */
+
+	reg_mic4ctrl.u32 = reg_prictrl.u32;
+	reg_mic4ctrl.uCTRL_INVCLK = reg_prictrl.uCTRL_INVCLK == 0 ? 1 : 0; /* Invert uCTRL_INVCLK */
+	reg_mic4ctrl.uCTRL_INVFS = reg_prictrl.uCTRL_INVFS == 0 ? 1 : 0; /* Invert uCTRL_INVFS */
+	reg_mic4ctrl.uCTRL_TDM = reg_prictrl.uCTRL_TDM;
+	reg_mic4ctrl.uCTRL_TCF = reg_prictrl.uCTRL_TCF;
+	reg_mic4ctrl.uCTRL_TDMMODE = reg_prictrl.uCTRL_TDMMODE;
+
+	address = RA_AIO_MIC4 + RA_MIC4_MICCTRL + RA_PRIAUD_CTRL;
+	aio_write(aio, address, reg_mic4ctrl.u32);
+	aio_trace_reg(aio, "AIO_MIC4_MICCTRL_CTRL", address, reg_mic4ctrl.u32);
+
+	/* AIO_MIC4_RXDATA register*/
+	reg_rxdata.uRXDATA_HBR = 0;
+	reg_rxdata.uRXDATA_TDM_HR = reg_mic4ctrl.uCTRL_TDMMODE;
+	address = RA_AIO_MIC4 + RA_MIC4_RXDATA;
+	aio_write(aio, address, reg_rxdata.u32[0]);
+	aio_trace_reg(aio, "AIO_MIC4_RXDATA", address, reg_rxdata.u32[0]);
+
+	/* AIO_MIC4_INTLMODE */
+	reg_prisrc.u32[0] = aio_read(aio, RA_AIO_PRISRC);
+	address = RA_AIO_MIC4 + RA_MIC4_INTLMODE;
+	reg_intlmode.u32 = 0;
+	if (dummy_data) {
+		reg_intlmode.uINTLMODE_DUMMYDATA_EN = 1;
+		pr_info(
+		"capture %d chan,%d chan with dummy data\n",
+				chan_num, 8 - chan_num);
+		chan_num = 8;
+	} else {
+		int pri_chn_num;
+
+		pri_chn_num = aio_get_pri_channel_num(
+				reg_prictrl.uCTRL_TDMMODE,
+				reg_prictrl.uCTRL_TDMCHCNT,
+				reg_prisrc.uPRISRC_SEL);
+
+		if (chan_num > pri_chn_num) {
+			pr_err("%d/%d,no dummy data, fail\n",
+				   pri_chn_num, chan_num);
+			return -EINVAL;
+		}
+	}
+
+	reg_intlmode.uINTLMODE_PORT0_EN = 1;
+	if (reg_prisrc.uPRISRC_SEL > 0)
+		reg_intlmode.uINTLMODE_PORT1_EN = 1;
+
+	if (reg_prisrc.uPRISRC_SEL > 1)
+		reg_intlmode.uINTLMODE_PORT2_EN = 1;
+
+	if (reg_prisrc.uPRISRC_SEL > 2)
+		reg_intlmode.uINTLMODE_PORT3_EN = 1;
+
+	aio_write(aio, address, reg_intlmode.u32);
+	aio_trace_reg(aio, "AIO_MIC4_INTLMODE", address, reg_intlmode.u32);
+
+	/* AIO_MIC4_HBRDMAP */
+	address = RA_AIO_MIC4 + RA_MIC4_HBRDMAP;
+	reg_hbrmap.u32 = 0;
+	reg_hbrmap.uHBRDMAP_PORT3 = reg_prisrc.uPRISRC_L3DATAMAP;
+	reg_hbrmap.uHBRDMAP_PORT2 = reg_prisrc.uPRISRC_L2DATAMAP;
+	reg_hbrmap.uHBRDMAP_PORT1 = reg_prisrc.uPRISRC_L1DATAMAP;
+	reg_hbrmap.uHBRDMAP_PORT0 = reg_prisrc.uPRISRC_L0DATAMAP;
+	aio_write(aio, address, reg_hbrmap.u32);
+	aio_trace_reg(aio, "AIO_MIC4_HBRDMAP", address, reg_hbrmap.u32);
+	return 0;
+}
+
+static int aio_configure_hdmi_lpbk(struct aio_priv *aio,
+				 u8 chan_num, u8 dummy_data)
+{
+	T32PRIAUD_CTRL reg_hdmictrl;
+	T32PRIAUD_CLKDIV reg_clkdiv;
+	T32PRIAUD_CTRL reg_mic5ctrl;
+	T32MIC5_HBRDMAP reg_hbrmap;
+	T32MIC5_INTLMODE reg_intlmode;
+	TMIC5_RXDATA  reg_rxdata;
+	u32 address;
+
+	/* AIO_MIC5_MICCTRL_CLKDIV */
+	address = RA_AIO_MIC5 + RA_MIC5_MICCTRL + RA_PRIAUD_CLKDIV;
+	reg_clkdiv.uCLKDIV_SETTING = 0;
+	aio_write(aio, address, reg_clkdiv.u32);
+	aio_trace_reg(aio, "AIO_MIC5_MICCTRL_CLKDIV", address, reg_clkdiv.u32);
+
+	/* read HDMI i2s configure */
+	address = RA_AIO_HDMI + RA_HDMI_HDAUD + RA_PRIAUD_CTRL;
+	reg_hdmictrl.u32 = aio_read(aio, address);
+	aio_trace_reg(aio, "AIO_HDMI_HDAUD_CTRL", address, reg_hdmictrl.u32);
+	/* AIO_MIC5_MICCTRL_CTRL register*/
+	address = RA_AIO_MIC5 + RA_MIC5_MICCTRL + RA_PRIAUD_CTRL;
+	reg_mic5ctrl.u32 = aio_read(aio, address);
+	aio_trace_reg(aio, "AIO_MIC5_MICCTRL_CTRL", address, reg_mic5ctrl.u32);
+	reg_mic5ctrl.u32 = reg_hdmictrl.u32;
+	reg_mic5ctrl.uCTRL_INVCLK = 0;/*noise without it*/
+	reg_mic5ctrl.uCTRL_TDM = AIO_32DFM;
+	reg_mic5ctrl.uCTRL_TCF = AIO_32CFM;
+	reg_mic5ctrl.uCTRL_TDMMODE = 0;
+	/* make remain same as HDMI i2s configure*/
+	aio_write(aio, address, reg_mic5ctrl.u32);
+	aio_trace_reg(aio, "AIO_MIC5_MICCTRL_CTRL", address, reg_mic5ctrl.u32);
+
+	/* AIO_MIC5_RXDATA register*/
+	reg_rxdata.uRXDATA_HBR = 0;
+	reg_rxdata.uRXDATA_TDM_HR = 0;
+	address = RA_AIO_MIC5 + RA_MIC5_RXDATA;
+	aio_write(aio, address, reg_rxdata.u32[0]);
+	aio_trace_reg(aio, "AIO_MIC5_RXDATA", address, reg_rxdata.u32[0]);
+
+	/* AIO_MIC5_INTLMODE */
+	address = RA_AIO_MIC5 + RA_MIC5_INTLMODE;
+	reg_intlmode.u32 = 0;
+	if (dummy_data) {
+		reg_intlmode.uINTLMODE_DUMMYDATA_EN = 1;
+		pr_info(
+		"capture %d chan,%d chan with dummy data\n",
+				chan_num, 8 - chan_num);
+		chan_num = 8;
+	} else {
+		T32AIO_HDSRC reg;
+
+		reg.u32 = aio_read(aio, RA_AIO_HDSRC);
+		if (reg.uHDSRC_SEL == AIO_HDMI_LPCM_SRC_64b &&
+			chan_num > 2) {
+			pr_err("%d chan, no dummy data, fail\n",
+				   chan_num);
+			return -EINVAL;
+		}
+	}
+	chan_num = (chan_num + 1) / 2;
+
+	reg_intlmode.uINTLMODE_PORT0_EN = 1;
+
+	if (chan_num > 1)
+		reg_intlmode.uINTLMODE_PORT1_EN = 1;
+
+	if (chan_num > 2)
+		reg_intlmode.uINTLMODE_PORT2_EN = 1;
+
+	if (chan_num > 3)
+		reg_intlmode.uINTLMODE_PORT3_EN = 1;
+
+	aio_write(aio, address, reg_intlmode.u32);
+	aio_trace_reg(aio, "AIO_MIC5_INTLMODE", address, reg_intlmode.u32);
+
+	/* AIO_MIC5_HBRDMAP */
+	address = RA_AIO_MIC5 + RA_MIC5_HBRDMAP;
+	reg_hbrmap.u32 = 0;
+
+	reg_hbrmap.uHBRDMAP_PORT0 = 0;
+
+	if (chan_num > 1)
+		reg_hbrmap.uHBRDMAP_PORT1 = 1;
+
+	if (chan_num > 2)
+		reg_hbrmap.uHBRDMAP_PORT2 = 2;
+
+	if (chan_num > 3)
+		reg_hbrmap.uHBRDMAP_PORT3 = 3;
+
+	aio_write(aio, address, reg_hbrmap.u32);
+	aio_trace_reg(aio, "AIO_MIC5_HBRDMAP", address, reg_hbrmap.u32);
+
+	return 0;
+}
+
+int aio_configure_loopback(void *hd, u32 id, u8 chan_num, u8 dummy_data)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	int ret = 0;
+
+	switch (id) {
+	case AIO_ID_MIC4_RX:
+		ret = aio_configure_pri_lpbk(aio, chan_num, dummy_data);
+		break;
+	case AIO_ID_MIC5_RX:
+		ret = aio_configure_hdmi_lpbk(aio, chan_num, dummy_data);
+		break;
+	default:
+		pr_err("%s, id(%d) not supported\n", __func__, id);
+		return -EINVAL;
+	}
+	return ret;
+}
+EXPORT_SYMBOL(aio_configure_loopback);
+
+int aio_setspdif_en(void *hd, bool enable)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32AUDCH_CTRL reg;
+
+	address = RA_AIO_SPDIF + RA_SPDIF_SPDIF + RA_AUDCH_CTRL;
+	reg.u32 = aio_read(aio, address);
+	reg.uCTRL_ENABLE = enable;
+
+	aio_write(aio, address, reg.u32);
+
+	return 0;
+}
+
+int aio_setspdifclk(void *hd, u32 div)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32SPDIF_CLKDIV reg;
+
+	address = RA_AIO_SPDIF + RA_SPDIF_CLKDIV;
+	reg.u32 = aio_read(aio, address);
+	reg.uCLKDIV_SETTING = div;
+	aio_write(aio, address, reg.u32);
+
+	return 0;
+}
+
+int aio_set_mode(void *hd, u32 id, u32 portMode, u32 clkMode, u32 dataMode)
+{
+	pr_debug("%s stub\n", __func__);
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_mode);
+
+int aio_set_i2s_clk_enable(void *hd, u32 clk_idx, bool enable)
+{
+	struct aio_handle *handle = hd;
+	struct aio_priv *aio = hd_to_aio(hd);
+	T32avioGbl_CTRL1 reg;
+
+	pr_info("%s: %s (clk_idx:%d, enable:%d)\n", handle->name, __func__, clk_idx, enable);
+
+	reg.u32 = aio_read_gbl(aio, RA_avioGbl_CTRL1);
+
+	switch (clk_idx) {
+	case AIO_I2S_I2S1_MCLK:
+		reg.uCTRL1_I2S1_MCLK_OEN = enable;
+		break;
+	case AIO_I2S_I2S3_BCLK:
+		reg.uCTRL1_I2S3_BCLK_OEN = enable;
+		break;
+	case AIO_I2S_I2S3_LRCK:
+		reg.uCTRL1_I2S3_LRCLK_OEN  = enable;
+		break;
+	case AIO_PDM_CLK:
+		reg.uCTRL1_PDM_CLK_OEN  = enable;
+		break;
+	default:
+		pr_err("clk_idx(%d) not support %s\n", clk_idx, __func__);
+		return -EINVAL;
+	}
+
+	aio_write_gbl(aio, RA_avioGbl_CTRL1, reg.u32);
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_i2s_clk_enable);
+
+int aio_set_pcm_mono(void *hd,
+		u32 id, bool en)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	TPRIAUD_CTRL reg;
+
+	if (aio == NULL)
+		return -EINVAL;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_PRI + RA_PRI_PRIAUD + RA_PRIAUD_CTRL;
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_SEC + RA_SEC_SECAUD + RA_PRIAUD_CTRL1;
+		break;
+	case AIO_ID_MIC_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_MICCTRL + RA_PRIAUD_CTRL1;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MIC2 + RA_MIC2_MICCTRL + RA_PRIAUD_CTRL1;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	reg.u32[1] = aio_read(aio, address);
+	reg.uCTRL_PCM_MONO_CH = en;
+	aio_write(aio, address, reg.u32[1]);
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_pcm_mono);
+
+int aio_set_slave_mode(void *hd, u32 id, u32 mod)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32AIO_PRISRC reg_pri;
+	T32AIO_SECSRC reg_sec;
+
+	if ((aio == NULL) || IS_INVALID_ID(id) || IS_INVALID_ID(mod))
+		return -EINVAL;
+
+	if (id == AIO_ID_PRI_TX) {
+		address = RA_AIO_PRISRC;
+		reg_pri.u32 = aio_read(aio, address);
+		reg_pri.uPRISRC_SLAVEMODE = mod;
+		aio_write(aio, address, reg_pri.u32);
+	} else if (id == AIO_ID_SEC_TX) {
+		address = RA_AIO_SECSRC;
+		reg_sec.u32 = aio_read(aio, address);
+		reg_sec.uSECSRC_SLAVEMODE = mod;
+		aio_write(aio, address, reg_sec.u32);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_slave_mode);
+
+int aio_set_mic_intlmode(void *hd, u32 id, u32 tsd, u32 en)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32MIC1_INTLMODE reg;
+
+	/*
+	 * inv is 1 bit number
+	 * 0: default value
+	 * 1: run in Interleaved Mode
+	 */
+	if ((aio == NULL) || IS_INVALID_ID(id)
+		|| IS_INVALID_ID(tsd) || IS_INVALID_1BIT_VAL(en)) {
+		return -EINVAL;
+	}
+
+	address = aio_get_intl_base_addr(id);
+
+	if (address == INVALID_ADDRESS)
+		return -EINVAL;
+
+	reg.u32 = aio_read(aio, address);
+	switch (tsd) {
+	case AIO_TSD0:
+		reg.uINTLMODE_PORT0_EN = en;
+		break;
+	case AIO_TSD1:
+		reg.uINTLMODE_PORT1_EN = en;
+		break;
+	case AIO_TSD2:
+		reg.uINTLMODE_PORT2_EN = en;
+		break;
+	case AIO_TSD3:
+		reg.uINTLMODE_PORT3_EN = en;
+		break;
+	default:
+		break;
+	}
+	aio_write(aio, address, reg.u32);
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_mic_intlmode);
+
+
+int aio_set_fsync(void *hd, u32 id, u32 sel, u32 inv)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32IOSEL_PRIFSYNC reg_pri;
+	T32IOSEL_SECFSYNC reg_sec;
+	T32IOSEL_MIC1FSYNC reg_mic1;
+	T32IOSEL_MIC2FSYNC reg_mic2;
+
+	if ((aio == NULL) || IS_INVALID_ID(id)
+		|| IS_INVALID_1BIT_VAL(sel) || IS_INVALID_1BIT_VAL(inv)) {
+		return -EINVAL;
+	}
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_PRIFSYNC;
+		reg_pri.u32 = aio_read(aio, address);
+		reg_pri.uPRIFSYNC_SEL = sel;
+		reg_pri.uPRIFSYNC_INV = inv;
+		aio_write(aio, address, reg_pri.u32);
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_SECFSYNC;
+		reg_sec.u32 = aio_read(aio, address);
+		reg_sec.uSECFSYNC_SEL = sel;
+		reg_sec.uSECFSYNC_INV = inv;
+		aio_write(aio, address, reg_sec.u32);
+		break;
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC1FSYNC;
+		reg_mic1.u32 = aio_read(aio, address);
+		reg_mic1.uMIC1FSYNC_SEL = sel;
+		reg_mic1.uMIC1FSYNC_INV = inv;
+		aio_write(aio, address, reg_mic1.u32);
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC2FSYNC;
+		reg_mic2.u32 = aio_read(aio, address);
+		reg_mic2.uMIC2FSYNC_SEL = sel;
+		reg_mic2.uMIC2FSYNC_INV = inv;
+		aio_write(aio, address, reg_mic2.u32);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_fsync);
+
+int aio_set_mic_mm_mode(void *hd, u32 id, u32 en)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32MIC1_MM_MODE reg;
+
+	/*
+	 * en is 1 bit number,
+	 * bydeafult is 0;
+	 * 1 Receiver in Master Mode to generate internal generated WS/FSYNC.
+	 */
+	if ((aio == NULL) || IS_INVALID_1BIT_VAL(en))
+		return -EINVAL;
+
+	switch (id) {
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_MM_MODE;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	reg.u32 = aio_read(aio, address);
+	reg.uMM_MODE_RCV_MASTER = en;
+	aio_write(aio, address, reg.u32);
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_mic_mm_mode);
+
+
+/* WS (Fsync/LRCK) period setting when receiver is set to Master Mode and WS generator
+ * acts as a standalone generator.
+ *
+ *  highP: High Cycle value for the FSYNC generation. writing 31 to this means the FSYNC
+ *         is high for 32 BCLK
+ *
+ *  totalP: Total FSYNC Period. Writing 63 to this means the total FSYNC Period is 64 BCLK
+ *
+ *  wsInv:  To invert the FSYNC
+ *      0 : Left Channel is High, Right Channel Low (LJ/RJ/TDM)
+ *      1 : Right Channel is High, Left Channel Low (I2S)
+ *
+ */
+int aio_set_mic_ws_prd(void *hd, u32 id, u32 highP, u32 totalP, u32 wsInv)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32MIC1_MM_MODE reg;
+
+	if (aio == NULL)
+		return -EINVAL;
+
+	switch (id) {
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_MM_MODE;
+		break;
+	default:
+		return -EINVAL;
+	}
+	reg.u32 = aio_read(aio, address);
+	reg.uMM_MODE_WS_HIGH_PRD = highP;
+	reg.uMM_MODE_WS_TOTAL_PRD = totalP;
+	reg.uMM_MODE_WS_INV = wsInv;
+	aio_write(aio, address, reg.u32);
+	pr_info("%s MM mode settings totalP %d highP %d wsInv %d",
+			__func__, totalP, highP, wsInv);
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_mic_ws_prd);
+
+
+int aio_set_bclk_sel(void *hd, u32 id, u32 sel)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32IOSEL_PRIBCLK reg_pri;
+	T32IOSEL_SECBCLK reg_sec;
+	T32IOSEL_MIC1BCLK reg_mic1;
+	T32IOSEL_MIC2BCLK reg_mic2;
+
+	/*
+	 * sel is 2 bits number,
+	 * 1 Bit Clock can be generated from Master Clock;
+	 * 0 can be taken directly from the input.
+	 */
+	if ((aio == NULL) || IS_INVALID_ID(id) || IS_INVALID_2BITS_VAL(sel))
+		return -EINVAL;
+
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_PRIBCLK;
+		reg_pri.u32 = aio_read(aio, address);
+		reg_pri.uPRIBCLK_SEL = sel;
+		aio_write(aio, address, reg_pri.u32);
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_SECBCLK;
+		reg_sec.u32 = aio_read(aio, address);
+		reg_sec.uSECBCLK_SEL = sel;
+		aio_write(aio, address, reg_sec.u32);
+		break;
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC1BCLK;
+		reg_mic1.u32 = aio_read(aio, address);
+		reg_mic1.uMIC1BCLK_SEL = sel;
+		aio_write(aio, address, reg_mic1.u32);
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC2BCLK;
+		reg_mic2.u32 = aio_read(aio, address);
+		reg_mic2.uMIC2BCLK_SEL = sel;
+		aio_write(aio, address, reg_mic2.u32);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_bclk_sel);
+
+int aio_set_bclk_inv(void *hd, u32 id, u32 inv)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32IOSEL_PRIBCLK reg_pri;
+	T32IOSEL_SECBCLK reg_sec;
+	T32IOSEL_MIC1BCLK reg_mic1;
+	T32IOSEL_MIC2BCLK reg_mic2;
+
+	/*
+	 * inv is 1 bit number,
+	 */
+	if ((aio == NULL) || IS_INVALID_ID(id) || IS_INVALID_1BIT_VAL(inv))
+		return -EINVAL;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_PRIBCLK;
+		reg_pri.u32 = aio_read(aio, address);
+		reg_pri.uPRIBCLK_SEL = inv;
+		aio_write(aio, address, reg_pri.u32);
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_IOSEL + RA_IOSEL_SECBCLK;
+		reg_sec.u32 = aio_read(aio, address);
+		reg_sec.uSECBCLK_SEL = inv;
+		aio_write(aio, address, reg_sec.u32);
+		break;
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC1BCLK;
+		reg_mic1.u32 = aio_read(aio, address);
+		reg_mic1.uMIC1BCLK_SEL = inv;
+		aio_write(aio, address, reg_mic1.u32);
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_IOSEL + RA_IOSEL_MIC2BCLK;
+		reg_mic2.u32 = aio_read(aio, address);
+		reg_mic2.uMIC2BCLK_SEL = inv;
+		aio_write(aio, address, reg_mic2.u32);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_bclk_inv);
+
+
+int aio_set_pdmmicsel(void *hd, u32 sel)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address = RA_AIO_PDM_MIC_SEL;
+	T32AIO_PDM_MIC_SEL reg;
+
+	if ((aio == NULL) || IS_INVALID_1BIT_VAL(sel))
+		return -EINVAL;
+
+	/*
+	 * ctrl.b0: 1 if MIC1 1-2 Channel is active,
+	 *			0 if PDM 1-2 Channel is active
+	 * ctrl.b1: 1 if MIC1 1-2 Channel is active,
+	 *			0 if PDM 1-2 Channel is active
+	 * ctrl.b2: 1 if MIC1 1-2 Channel is active,
+	 *			0 if PDM 1-2 Channel is active
+	 * ctrl.b3: 1 if MIC1 1-2 Channel is active,
+	 *			0 if PDM 1-2 Channel is active
+	 */
+	reg.u32 = aio_read(aio, address);
+	reg.uPDM_MIC_SEL_CTRL = sel;
+	aio_write(aio, address, reg.u32);
+
+	return 0;
+}
+EXPORT_SYMBOL(aio_set_pdmmicsel);
+
+int aio_enablerxport(void *hd, u32 id, bool enable)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32MIC1_RXPORT reg_mic1;
+	T32MIC2_RXPORT reg_mic2;
+
+	switch (id) {
+	case AIO_ID_MIC1_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_RXPORT;
+		reg_mic1.u32 = aio_read(aio, address);
+		reg_mic1.uRXPORT_ENABLE = enable;
+		aio_write(aio, address, reg_mic1.u32);
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MIC2 + RA_MIC2_RXPORT;
+		reg_mic2.u32 = aio_read(aio, address);
+		reg_mic2.uRXPORT_ENABLE = enable;
+		aio_write(aio, address, reg_mic2.u32);
+		break;
+	case AIO_ID_MIC4_RX:
+	case AIO_ID_MIC5_RX:
+	case AIO_ID_MIC6_RX:
+		aio_enablerxport_extra(hd, id, enable);
+		break;
+	default:
+		pr_err("%s , %d not support\n", __func__, id);
+		break;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(aio_enablerxport);
+
+int aio_enabletxport(void *hd, u32 id, bool enable)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address;
+	T32PRI_PRIPORT reg_pri;
+	T32SEC_SECPORT reg_sec;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_PRI + RA_PRI_PRIPORT;
+		reg_pri.u32 = aio_read(aio, address);
+		reg_pri.uPRIPORT_ENABLE = enable;
+		aio_write(aio, address, reg_pri.u32);
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_SEC + RA_SEC_SECPORT;
+		reg_sec.u32 = aio_read(aio, address);
+		reg_sec.uSECPORT_ENABLE = enable;
+		aio_write(aio, address, reg_sec.u32);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(aio_enabletxport);
+
+void aio_set_tdm(void *hd, u32 id, bool en, u32 chcnt, u32 wshigh)
+{
+	struct aio_priv *aio = hd_to_aio(hd);
+	u32 address = aio_get_ctrl_base_addr(id) + RA_PRIAUD_CTRL;
+	T32PRIAUD_CTRL reg;
+
+	switch (id) {
+	case AIO_ID_PRI_TX:
+	case AIO_ID_SEC_TX:
+	case AIO_ID_MIC6_RX:
+		break;
+	default:
+		pr_info("%s: id(%d) not supported\n", __func__, id);
+		return;
+	}
+
+	if (address == INVALID_ADDRESS)
+		return;
+
+	reg.u32 = aio_read(aio, address);
+	reg.uCTRL_TDMMODE = en;
+	reg.uCTRL_TDMCHCNT = chcnt;
+	reg.uCTRL_TDMWSHIGH = wshigh;
+	reg.uCTRL_TCF_MANUAL = 0;
+	aio_write(aio, address, reg.u32);
+}
+EXPORT_SYMBOL(aio_set_tdm);
+
+u32 aio_get_ctrl_base_addr(u32 id)
+{
+	u32 address;
+
+	switch (id) {
+	case AIO_ID_MIC_RX:
+		address = RA_AIO_MIC1 + RA_MIC1_MICCTRL;
+		break;
+	case AIO_ID_PRI_TX:
+		address = RA_AIO_PRI + RA_PRI_PRIAUD;
+		break;
+	case AIO_ID_SEC_TX:
+		address = RA_AIO_SEC + RA_SEC_SECAUD;
+		break;
+	case AIO_ID_MIC2_RX:
+		address = RA_AIO_MIC2 + RA_MIC2_MICCTRL;
+		break;
+	case AIO_ID_HDMI_TX:
+	case AIO_ID_MIC4_RX:
+	case AIO_ID_MIC5_RX:
+	case AIO_ID_MIC6_RX:
+		address = aio_get_addr_extra(id);
+		break;
+	default:
+		/* will return AIO PRI address*/
+		pr_warn("%s: id(%d) not supported\n", __func__, id);
+		return INVALID_ADDRESS;
+	}
+
+	return address;
+}
+EXPORT_SYMBOL(aio_get_ctrl_base_addr);
+
+u32 aio_get_offset_from_ch(u32 ID, u32 tsd)
+{
+	u32 offset = 0;
+
+	switch (ID) {
+	case AIO_ID_PRI_TX:
+		offset = I2S_PRI_OFFSET + sizeof(SIE_AUDCH) * tsd;
+		break;
+	case AIO_ID_SEC_TX:
+		offset =  I2S_SEC_OFFSET;
+		break;
+	case AIO_ID_MIC_RX:
+		if (tsd == AIO_TSD0)
+			offset = RA_AIO_MIC1 + RA_MIC1_RSD0;
+		else
+			offset = RA_AIO_MIC1 + RA_MIC1_RSD1 +
+					sizeof(SIE_AUDCH) * (tsd - 1);
+		break;
+	case AIO_ID_MIC2_RX:
+		offset = I2S_MIC2_OFFSET;
+		break;
+	case AIO_ID_SPDIF_TX:
+	case AIO_ID_HDMI_TX:
+	case AIO_ID_MIC4_RX:
+	case AIO_ID_MIC5_RX:
+	case AIO_ID_MIC6_RX:
+		offset = aio_get_offset_extra(ID, tsd);
+		break;
+	default:
+		offset = 0;
+		break;
+	}
+
+	return offset;
+}
+EXPORT_SYMBOL(aio_get_offset_from_ch);

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Backlight & LCD drivers configuration
+#
+
+config BACKLIGHT_DVF9A
+	tristate "Backlight driver for the DSPG-DVF9A"
+	depends on MFD_DSPG_DVF9A
+	help
+	  This supports the DSPG-DVF9A backlight driver.

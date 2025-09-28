@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Watchdog device configuration
+#
+
+menuconfig SYNAPTICS_WATCHDOG
+  bool "Synaptics wtd driver support"
+  default y
+  help
+    Synaptics wtd driver support
+
+if SYNAPTICS_WATCHDOG
+
+config DSPG_WATCHDOG
+	tristate "DSPG watchdog"
+	depends on PLAT_DVF
+	select WATCHDOG_CORE
+	help
+	  Say Y here to include support for the watchdog timer for the
+	  DSPG SoCs.
+	  To compile this driver as a module, choose M here: the
+	  module will be called dspg_wdt.
+
+endif

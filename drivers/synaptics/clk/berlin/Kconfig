@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config SYNA_DOLPHIN_PLL
+	tristate "Synaptics DOLPHIN pll drivers"
+	depends on ARCH_BERLIN
+	help
+	  Build the pll drivers for berlin DOLPHIN/PLATYPUS SOCs.
+
+config SYNA_AS370_PLL
+	tristate "Synaptics AS370 pll drivers"
+	depends on ARCH_BERLIN
+	help
+	  Build the pll drivers for berlin AS370/MYNA SOCs.
+
+config SYNA_CLK_BASE
+	tristate "Synaptics switch/gate base drivers"
+	depends on ARCH_BERLIN
+	help
+	  Build the base clk driver for synaptics SOCs.
+
+config SYNA_AS370_CLK
+	tristate "Synaptics AS370 SOC's switch/gate clk drivers"
+	depends on SYNA_CLK_BASE
+	help
+	  Build the clk drivers for berlin AS370 SOCs.
+
+config SYNA_MYNA_CLK
+	tristate "Synaptics MYNA SOC's switch/gate clk drivers"
+	depends on SYNA_CLK_BASE
+	help
+	  Build the clk drivers for berlin MYNA SOCs.
+
+config SYNA_MYNA2_CLK
+        tristate "Synaptics MYNA2 SOC's switch/gate clk drivers"
+        depends on SYNA_CLK_BASE
+        help
+          Build the clk drivers for berlin MYNA2 SOCs.
+
+config SYNA_PLATYPUS_CLK
+	tristate "Synaptics PLATYPUS SOC's switch/gate clk drivers"
+	depends on SYNA_CLK_BASE
+	help
+	  Build the clk drivers for berlin PLATYPUS SOCs.
+
+config SYNA_DOLPHIN_CLK
+	tristate "Synaptics DOLPHIN SOC's switch/gate clk drivers"
+	depends on SYNA_CLK_BASE
+	help
+	  Build the clk drivers for berlin DOLPHIN SOCs.
+
+config SYNA_SL261X_CLK
+	tristate "Synaptics SL261X SOC's clk drivers"
+	depends on SYNA_CLK_BASE
+	default n
+	help
+	  Build the clk drivers for Synaptics SL261X SOCs.

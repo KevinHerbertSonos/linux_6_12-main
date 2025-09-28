@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menuconfig SYNAPTICS_PCIE
+  bool "Synaptics PCIe driver support"
+  default y
+  help
+    Synaptics PCIe driver support
+
+if SYNAPTICS_PCIE
+
+config PCIE_BERLIN
+	tristate "Synaptics Berlin PCIe controller"
+	depends on PCI
+	depends on ARCH_BERLIN && OF
+        depends on PCI_MSI_IRQ_DOMAIN != ""
+	select PCIE_DW_HOST
+
+endif

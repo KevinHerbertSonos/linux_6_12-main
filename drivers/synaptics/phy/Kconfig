@@ -1,0 +1,23 @@
+#
+# Phy drivers for Synaptics platforms
+#
+
+menuconfig SYNAPTICS_PHY
+  bool "Synaptics phy driver support"
+  default y
+  help
+    Synaptics PHY driver support
+
+if SYNAPTICS_PHY
+
+source "drivers/synaptics/phy/synaptics/Kconfig"
+
+config PHY_SYNOPSYS_USB_PICOPHY
+	tristate "Synopsys USB PicoPHY support for DVF platforms"
+	depends on PLAT_DVF
+	select GENERIC_PHY
+	help
+	  Say Y here to add support for the Synopsys PicoPHY. The PHY can be
+	  connected to host or dual-role/OTG controllers on DSPG DVF platforms.
+
+endif

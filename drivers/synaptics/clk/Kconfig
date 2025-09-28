@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+
+menuconfig SYNAPTICS_CLK
+  bool "Synaptics clock driver support"
+  default y
+  help
+    Synaptics clock driver support
+
+if SYNAPTICS_CLK
+
+source "drivers/synaptics/clk/berlin/Kconfig"
+
+source "drivers/synaptics/clk/dspg/Kconfig"
+
+endif

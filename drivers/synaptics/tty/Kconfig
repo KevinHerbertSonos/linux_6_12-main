@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+
+menuconfig SYNAPTICS_TTY
+  bool "Synaptics tty driver support"
+  default y
+  help
+    Synaptics tty driver support
+
+if SYNAPTICS_TTY
+
+source "drivers/synaptics/tty/serial/Kconfig"
+
+endif

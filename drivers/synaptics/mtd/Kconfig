@@ -1,0 +1,14 @@
+
+menuconfig SYNAPTICS_MTD
+  bool "Synaptics mtd driver support"
+  default y
+  help
+    Synaptics MTD driver support
+
+if SYNAPTICS_MTD
+
+source "drivers/synaptics/mtd/devices/Kconfig"
+
+source "drivers/synaptics/mtd/nand/Kconfig"
+
+endif

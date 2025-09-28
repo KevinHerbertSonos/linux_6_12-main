@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# rpmsg configuration
+#
+
+menuconfig SYNAPTICS_RPMSG
+  bool "Synaptics RPMSG support"
+  default y
+  help
+    Synaptics RPMSG support
+
+if SYNAPTICS_RPMSG
+
+config SYNA_RPMSG
+	tristate "Synaptics RPMSG Driver"
+	depends on MAILBOX
+	select RPMSG
+	default n
+	help
+	  Say y here to enable support for the Synaptics RPMSG Driver
+	  providing communication channels to remote processors in Synaptics
+	  platforms.
+
+config RPMSG_CLIENT_PINGPONG
+	tristate "RPMSG client pingpong demo -- module only"
+	depends on SYNA_RPMSG && m
+	default n
+	help
+	  One unsigned int transactions rpmsg client demo between Linux and
+	  the remote mcu in Synaptics platforms.
+
+endif

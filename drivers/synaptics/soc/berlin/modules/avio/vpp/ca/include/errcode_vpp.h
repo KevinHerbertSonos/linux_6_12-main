@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright (C) 2020 Synaptics Incorporated */
+
+#ifndef _ERRCODE_VPP_H_
+#define _ERRCODE_VPP_H_
+
+#include "avio_type.h"
+
+#define E_VPP_BASE (0x0200 << 16)
+#define S_VPP(code) (E_SUC | E_VPP_BASE | ((code) & 0xFFFF))
+#define E_VPP(code) (E_ERR | E_VPP_BASE | ((code) & 0xFFFF))
+#define S_VPP_OK             (S_OK)
+
+/* VPP_TA_E_XXXX  --- error RETURN code from TA */
+#define VPP_TA_E_NODEV	1
+#define VPP_TA_E_BADPARAM	2
+#define VPP_TA_E_BADCALL	3
+#define VPP_TA_E_UNSUPPORT	4
+#define VPP_TA_E_IOFAIL	5
+#define VPP_TA_E_UNCONFIG	6
+#define VPP_TA_E_CMDQFULL	7
+#define VPP_TA_E_FRAMEQFULL	8
+#define VPP_TA_E_BCMBUFFULL	9
+#define VPP_TA_E_NOMEM	10
+#define VPP_TA_E_VBIBUFFULL	11
+#define VPP_TA_E_HARDWAREBUSY	12
+#define VPP_TA_E_SWSTATEWRONG	14
+
+/* VPP_E_XXXX  --- error RETURN code from CA to Service/Application */
+#define VPP_E_NODEV		E_VPP(VPP_TA_E_NODEV)
+#define VPP_E_BADPARAM		E_VPP(VPP_TA_E_BADPARAM)
+#define VPP_E_BADCALL		E_VPP(VPP_TA_E_BADCALL)
+#define VPP_E_UNSUPPORT		E_VPP(VPP_TA_E_UNSUPPORT)
+#define VPP_E_IOFAIL		E_VPP(VPP_TA_E_IOFAIL)
+#define VPP_E_UNCONFIG		E_VPP(VPP_TA_E_UNCONFIG)
+#define VPP_E_CMDQFULL		E_VPP(VPP_TA_E_CMDQFULL)
+#define VPP_E_FRAMEQFULL	E_VPP(VPP_TA_E_FRAMEQFULL)
+#define VPP_E_BCMBUFFULL	E_VPP(VPP_TA_E_BCMBUFFULL)
+#define VPP_E_NOMEM		E_VPP(VPP_TA_E_NOMEM)
+#define VPP_E_VBIBUFFULL	E_VPP(VPP_TA_E_VBIBUFFULL)
+#define VPP_E_HARDWAREBUSY	E_VPP(VPP_TA_E_HARDWAREBUSY)
+#define VPP_E_SWSTATEWRONG	E_VPP(VPP_TA_E_SWSTATEWRONG)
+#endif //_ERRCODE_VPP_H_

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Touchscreen driver configuration
+#
+
+config TOUCHSCREEN_FT7421
+	tristate "FT7421 I2C touchscreen"
+	depends on I2C && OF
+	help
+	  Say Y here to enable support for the Focaltech FT7421 touch panel
+
+config TOUCHSCREEN_FT5X06
+	tristate "FT5X06 I2C touchscreen"
+	depends on I2C && OF
+	help
+	  Say Y here to enable support for the Focaltech FT5X06 touch panel
+
+config TOUCHSCREEN_DVF9A
+	tristate "DVF9A based touchscreens"
+	depends on MFD_DSPG_DVF9A
+	help
+	Say Y here if you have a DVF9A acting as a touchscreen
+	controller.
+
+	If unsure, say N.

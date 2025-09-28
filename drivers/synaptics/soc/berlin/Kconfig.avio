@@ -1,0 +1,34 @@
+#
+# AVIO variants
+#
+
+if ARCH_BERLIN
+
+choice
+	prompt	"Synaptics AVIO Variants"
+	default	AVIO_NONE
+
+config AVIO_NONE
+	bool	"Not select any AVIO variant in default"
+
+config AVIO_AS370
+	bool	"Synaptics AS370"
+
+config AVIO_MYNA
+	bool	"Synaptics MYNA"
+
+config AVIO_MYNA2
+        bool    "Synaptics MYNA2"
+
+config AVIO_PLATYPUS
+	bool	"Synaptics PLATYPUS"
+
+config AVIO_DOLPHIN
+	bool	"Synaptics DOLPHIN"
+
+config AVIO_DOLPHIN_A0
+	bool	"Synaptics DOLPHIN A0"
+
+endchoice
+
+endif

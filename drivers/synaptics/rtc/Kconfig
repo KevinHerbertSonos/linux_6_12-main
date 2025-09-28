@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# RTC class/drivers configuration
+#
+
+menuconfig SYNAPTICS_RTC
+  bool "Synaptics rtc driver support"
+  default y
+  help
+    Synaptics rtc driver support
+
+if SYNAPTICS_RTC
+
+config RTC_DRV_DSPG
+	tristate "DSPG RTC support"
+	help
+	  DSPG RTC support
+
+endif

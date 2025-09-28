@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Multifunction miscellaneous devices
+#
+
+menuconfig SYNAPTICS_MFD
+  bool "Synaptics mfd driver support"
+  default y
+  help
+    Synaptics mfd driver support
+
+if SYNAPTICS_MFD
+
+config MFD_DSPG_DVF9A
+	tristate "Support for DSPG-DVF9A including DAIF interface"
+	select MFD_CORE
+	help
+	  Select this option to get support for the DSPG-DVF9 chip,
+	  including access to the DAIF interface.
+
+endif

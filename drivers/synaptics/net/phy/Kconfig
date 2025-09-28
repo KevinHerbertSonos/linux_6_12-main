@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# PHY Layer Configuration
+#
+
+config SUNPLUS_PHY
+	tristate "SUNPLUS PHYs"
+	help
+	  Supports the SUNPLUS PHY.

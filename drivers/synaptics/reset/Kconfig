@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig SYNAPTICS_RESET
+  bool "Synaptics reset driver support"
+  default y
+  help
+    Synaptics reset driver support
+
+if SYNAPTICS_RESET
+
+config RESET_BERLIN
+	tristate "Berlin Reset Driver"
+	depends on ARCH_BERLIN || COMPILE_TEST
+	default m if ARCH_BERLIN
+	help
+	  This enables the reset controller driver for Marvell Berlin SoCs.
+
+config GPIO_RESET_CONTROLLER
+	tristate "GPIO reset controller"
+	help
+	  Reset controller using GPIO lines
+
+	  There are two main methods of using this controller:
+	  * As a reset controller within the reset framework allowing device
+	  drivers to request a hardware reset of their devices.
+	  * As a standalone driver performing reset at boot or upon userspace
+	  request (via sysfs)
+	  The second method is suitable for devices on discoverable busses
+	  (SDIO, USB)
+
+source "drivers/synaptics/reset/dspg/Kconfig"
+
+endif

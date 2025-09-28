@@ -1,0 +1,190 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2021 Synaptics Incorporated
+
+#
+# kernel module: pvrsrvkm.ko
+#
+
+MODULE_NAME ?= pvrsrvkm
+
+TEE_INC_PATH += -I$(srctree)/drivers/synaptics/soc/berlin/modules/tzd/tee/client_api \
+       -I$(srctree)/drivers/synaptics/soc/berlin/modules/tzd/tee/common \
+       -I$(srctree)/drivers/synaptics/soc/berlin/modules/tzd/tz/common \
+       -I$(srctree)/drivers/synaptics/soc/berlin/modules/tzd/include \
+       -I$(srctree)/drivers/synaptics/soc/berlin/modules/tzd
+
+
+EXTRA_CFLAGS += -I $(srctree)/drivers/synaptics/soc/berlin/modules/rogue_ws/include/
+EXTRA_CFLAGS += -I $(srctree)/drivers/synaptics/soc/berlin/modules/rogue_ws/include/km/
+EXTRA_CFLAGS += $(TEE_INC_PATH)
+EXTRA_CFLAGS += -Werror
+
+
+ifeq ($(CONFIG_GPU_DOLPHIN),y)
+    EXTRA_CFLAGS += -include $(srctree)/drivers/synaptics/soc/berlin/modules/rogue_ws/dolphin_config_kernel.h
+else ifeq ($(CONFIG_GPU_PLATYPUS),y)
+    EXTRA_CFLAGS += -include $(srctree)/drivers/synaptics/soc/berlin/modules/rogue_ws/platypus_config_kernel.h
+else ifeq ($(CONFIG_GPU_MYNA2),y)
+    EXTRA_CFLAGS += -include $(srctree)/drivers/synaptics/soc/berlin/modules/rogue_ws/myna2_config_kernel.h
+endif
+
+OBJS := src/allocmem.o \
+        src/cache_km.o \
+        src/client_cache_direct_bridge.o \
+        src/client_devicememhistory_direct_bridge.o \
+        src/client_mm_direct_bridge.o \
+        src/client_pvrtl_direct_bridge.o \
+        src/client_sync_direct_bridge.o \
+        src/client_synctracking_direct_bridge.o \
+        src/connection_server.o \
+        src/debug_common.o \
+        src/di_impl_brg.o \
+        src/devicemem.o \
+        src/devicemem_heapcfg.o \
+        src/devicemem_history_server.o \
+        src/devicemem_server.o \
+        src/devicemem_utils.o \
+        src/dkf_server.o \
+        src/dma_support.o \
+        src/event.o \
+        src/handle.o \
+        src/handle_idr.o \
+        src/hash.o \
+        src/hash_functions.o \
+        src/info_page_km.o \
+        src/interrupt_support.o \
+        src/km_apphint.o \
+        src/lists.o \
+        src/mem_utils.o \
+        src/mmu_common.o \
+        src/module_common.o \
+        src/osconnection_server.o \
+        src/osfunc_arm64.o \
+        src/osfunc.o \
+        src/osmmap_stub.o \
+        src/physheap.o \
+        src/physmem.o \
+        src/physmem_dmabuf.o \
+        src/physmem_extmem.o \
+        src/physmem_extmem_linux.o \
+        src/physmem_hostmem.o \
+        src/physmem_lma.o \
+        src/physmem_osmem.o \
+        src/physmem_osmem_linux.o \
+        src/physmem_ramem.o \
+        src/physmem_test.o \
+        src/pmr.o \
+        src/pmr_env.o \
+        src/pmr_os.o \
+        src/power.o \
+        src/process_stats.o \
+        src/pvr_bridge_k.o \
+        src/pvr_counting_timeline.o \
+        src/pvr_debug.o \
+        src/pvr_debugfs.o \
+        src/pvr_drm.o \
+        src/pvr_export_fence.o \
+        src/pvr_fence.o \
+        src/pvr_notifier.o \
+        src/pvr_platform_drv.o \
+        src/pvrsrv_bridge_init.o \
+        src/pvrsrv.o \
+        src/pvrsrv_error.o \
+        src/pvrsrv_pool.o \
+        src/pvr_sw_fence.o \
+        src/pvr_sync_file.o \
+        src/pvr_sync_ioctl_common.o \
+        src/pvr_sync_ioctl_drm.o \
+        src/ra.o \
+        src/rgxbreakpoint.o \
+        src/rgx_bridge_init.o \
+        src/rgxbvnc.o \
+        src/rgxccb.o \
+        src/rgxcompute.o \
+        src/rgxdebug.o \
+        src/rgxdebug_common.o \
+        src/rgxfwcmnctx.o \
+        src/rgxfwdbg.o \
+        src/rgxfwimageutils.o \
+        src/rgxfwriscv.o \
+        src/rgxfwutils.o \
+        src/rgxhwperf.o \
+        src/rgxhwperf_common.o \
+        src/rgx_hwperf_table.o \
+        src/rgxinit.o \
+        src/rgxlayer_impl.o \
+        src/rgxlayer_impl_common.o \
+        src/rgxmem.o \
+        src/rgxmipsmmuinit.o \
+        src/rgxmmuinit.o \
+        src/rgxpower.o \
+        src/rgxregconfig.o \
+        src/rgxsrvinit.o \
+        src/rgxstartstop.o \
+        src/rgxsyncutils.o \
+        src/rgxta3d.o \
+        src/rgxtdmtransfer.o \
+        src/rgxtimecorr.o \
+        src/rgxtransfer.o \
+        src/rgxtimerquery.o \
+        src/rgxutils.o \
+        src/server_cache_bridge.o \
+        src/server_cmm_bridge.o \
+        src/server_devicememhistory_bridge.o \
+        src/server_dmabuf_bridge.o \
+        src/server_di_bridge.o \
+        src/server_mmextmem_bridge.o \
+        src/server_mm_bridge.o \
+        src/server_pvrtl_bridge.o \
+        src/server_rgxbreakpoint_bridge.o \
+        src/server_rgxcmp_bridge.o \
+        src/server_rgxfwdbg_bridge.o \
+        src/server_rgxhwperf_bridge.o \
+        src/server_rgxregconfig_bridge.o \
+        src/server_rgxtimerquery_bridge.o \
+        src/server_rgxta3d_bridge.o \
+        src/server_rgxtq2_bridge.o \
+        src/server_rgxtq_bridge.o \
+        src/server_srvcore_bridge.o \
+        src/server_sync_bridge.o \
+        src/server_synctracking_bridge.o \
+        src/srvcore.o \
+        src/sync.o \
+        src/sync_checkpoint.o \
+        src/sync_server.o \
+        src/sysconfig.o \
+        src/tlclient.o \
+        src/tlintern.o \
+        src/tlserver.o \
+        src/tlstream.o \
+        src/uniq_key_splay_tree.o \
+        src/vmm_pvz_client.o \
+        src/vmm_pvz_server.o \
+        src/vmm_type_stub.o \
+        src/vz_vmm_pvz.o \
+        src/vz_vmm_vm.o \
+        src/di_server.o \
+        src/fwload.o \
+        src/rgxfwtrace_strings.o \
+        src/rgxmulticore.o \
+        src/rgxshader.o \
+        src/pvr_buffer_sync.o
+
+ifeq ($(CONFIG_OPTEE),y)
+OBJS += src/gpu_tee.o
+else
+OBJS += src/gpu_tz.o
+endif
+
+ifdef $(DEBUG)
+OBJS += src/client_htbuffer_direct_bridge.o \
+        src/htb_debug.o \
+        src/htbserver.o \
+        src/htbuffer.o \
+        src/rgxkicksync.o \
+        src/server_htbuffer_bridge.o \
+        src/server_rgxkicksync_bridge.o
+endif
+
+obj-m += $(MODULE_NAME).o
+$(MODULE_NAME)-objs = $(OBJS)

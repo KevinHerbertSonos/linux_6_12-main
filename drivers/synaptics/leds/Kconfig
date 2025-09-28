@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig SYNAPTICS_LEDS
+  bool "Synaptics leds driver support"
+  default y
+  help
+    Synaptics leds driver support
+
+if SYNAPTICS_LEDS
+
+config LEDS_CPLD
+	tristate "LED support for the DSPG-EVB with CPLD"
+	depends on LEDS_CLASS && (ARCH_DVF || ARCH_DVF101)
+	help
+	  This option enables support for the LEDs on the DSPG-EVB (controlled
+	  through the CPLD). Say Y to enable LEDs on the DSPG-EVB.
+
+config LEDS_TLC5917
+	tristate "LED support for TLC5917"
+	depends on LEDS_CLASS
+	help
+	  Say Y to enable TLC5917 LED support.
+
+endif

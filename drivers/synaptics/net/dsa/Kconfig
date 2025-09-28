@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config NET_DSA_RTL8363SB
+	tristate "Realtek 8363SB/NB ethernet switch chip support"
+	depends on NET_DSA
+	select NET_DSA_TAG_EDSA
+	help
+	  This enables support for the Realtek 8363SB/NB ethernet switch chips.

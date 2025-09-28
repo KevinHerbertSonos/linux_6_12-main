@@ -1,0 +1,53 @@
+#
+# ISP variants
+#
+
+if SYNA_ISP
+
+choice
+	prompt	"Synaptics ISP Variants"
+	default	ISP_NONE
+
+config ISP_NONE
+	bool	"Not select any ISP variant in default"
+
+config ISP_DOLPHIN
+	bool	"Synaptics DOLPHIN"
+
+config ISP_DOLPHIN_A0
+	bool	"Synaptics DOLPHIN A0"
+
+endchoice
+
+config SYNA_ISP_BE
+	tristate "Support ISP BE Common utilities"
+	depends on SYNA_ISP
+	default n
+	help
+		isp be common utilities
+
+config SYNA_ISP_SCALER
+	tristate "Support for ISP Scaler component"
+	depends on VIDEO_DEV && SYNA_ISP
+	select V4L2_MEM2MEM_DEV
+	default n
+	help
+		isp scaler driver
+
+config VIDEO_VVCAM_DRIVER
+	tristate "Support VVCAM ISP driver"
+	depends on  VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	select VIDEOBUF2_DMA_CONTIG
+	help
+		vvcam isp driver
+
+config SYNA_ISP_DMA_HEAP
+	tristate "Support for ISP DMA HEAP for DMA Memory"
+	default n
+	help
+		isp dma heap
+
+endif

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig SYNAPTICS_IRQCHIP
+  bool "Synaptics irqchip driver support"
+  default y
+  help
+    Synaptics irqchip driver support
+
+if SYNAPTICS_IRQCHIP
+
+config BERLIN_DHUB_IRQ
+	tristate "Synaptics DHUB Interrupt Controller"
+	select GENERIC_IRQ_CHIP
+	select IRQ_DOMAIN
+
+config DSPG_PLICU
+	select IRQ_DOMAIN
+	select MULTI_IRQ_HANDLER
+	bool
+	default y
+	depends on PLAT_DVF
+
+config DSPG_EXTINT
+	bool "DSPG external interrupt driver"
+	default y
+	select IRQ_DOMAIN
+	depends on PINCTRL_DVF101 && OF
+
+endif

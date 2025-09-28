@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+
+menuconfig SYNAPTICS_SOC
+  bool "Synaptics soc driver support"
+  default y
+  help
+    Synaptics soc driver support
+
+if SYNAPTICS_SOC
+
+source "drivers/synaptics/soc/berlin/Kconfig"
+
+endif
