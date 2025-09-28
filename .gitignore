@@ -58,7 +58,6 @@ modules.order
 #
 # Top-level generic files
 #
-/drivers/synaptics/
 /linux
 /modules-only.symvers
 /vmlinux
